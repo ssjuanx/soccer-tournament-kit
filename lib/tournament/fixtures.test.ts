@@ -81,3 +81,76 @@ test("generateGroupFixtures: rejects duplicates and empty ids", () => {
   assert.throws(() => generateGroupFixtures(["a", ""], "A"), /non-empty/);
   assert.throws(() => generateGroupFixtures(["a", "b"], ""), /groupId/);
 });
+// ---------------------------------------------------------------------------
+// Additional edge cases (Step 3)
+// ---------------------------------------------------------------------------
+
+test("generateGroupFixtures: per-size match counts", () => {
+  const cases: Array<[number, number]> = [
+    [1, 0],
+    [2, 1],
+    [3, 3],
+    [4, 6],
+    [8, 28],
+  ];
+  for (const [n, expected] of cases) {
+    const ids = Array.from({ length: n }, (_, i) => `p${i}`);
+    assert.equal(
+      generateGroupFixtures(ids, "A").length,
+      expected,
+      `n=${n} -> ${expected}`,
+    );
+  }
+});
+
+test("generateGroupFixtures: 1-player group produces zero matches", () => {
+  assert.deepEqual(generateGroupFixtures(["solo"], "A"), []);
+});
+
+test("generateGroupFixtures: every participant plays exactly n-1 matches", () => {
+  for (const n of [2, 3, 4, 5, 8]) {
+    const ids = Array.from({ length: n }, (_, i) => `p${i}`);
+    const matches = generateGroupFixtures(ids, "A");
+    const appearances = new Map<string, number>();
+    for (const m of matches) {
+      for (const pid of [m.homeParticipantId!, m.awayParticipantId!]) {
+        appearances.set(pid, (appearances.get(pid) ?? 0) + 1);
+      }
+    }
+    for (const id of ids) {
+      assert.equal(appearances.get(id), n - 1, `${id} plays ${n - 1}`);
+    }
+  }
+});
+
+test("generateGroupFixtures: invariant matchCount === n*(n-1)/2", () => {
+  for (const n of [1, 2, 3, 4, 5, 6, 7, 8, 10]) {
+    const ids = Array.from({ length: n }, (_, i) => `p${i}`);
+    assert.equal(
+      generateGroupFixtures(ids, "A").length,
+      (n * (n - 1)) / 2,
+      `n=${n}`,
+    );
+  }
+});
+
+test("generateGroupFixtures: ids are stable and index-based, not name-based", () => {
+  const a = generateGroupFixtures(["a", "b", "c"], "A");
+  const b = generateGroupFixtures(["x", "y", "z"], "A");
+  assert.deepEqual(
+    a.map((m) => m.id),
+    ["A-0-1", "A-0-2", "A-1-2"],
+  );
+  assert.deepEqual(
+    a.map((m) => m.id),
+    b.map((m) => m.id),
+  );
+});
+
+test("generateGroupFixtures: same input produces identical full output", () => {
+  const ids = ["a", "b", "c", "d"];
+  assert.deepEqual(
+    generateGroupFixtures(ids, "A"),
+    generateGroupFixtures(ids, "A"),
+  );
+});

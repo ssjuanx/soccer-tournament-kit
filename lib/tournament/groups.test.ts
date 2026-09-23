@@ -101,3 +101,61 @@ test("getGroupIndexForDrawOrder: every slot maps to a valid group", () => {
     assert.ok(group >= 0 && group < sizes.length, `draw ${draw} in range`);
   }
 });
+// ---------------------------------------------------------------------------
+// Additional edge cases (Step 3)
+// ---------------------------------------------------------------------------
+
+test("getGroupSizes: 1 participant in 1 group", () => {
+  assert.deepEqual(getGroupSizes(1, 1), [1]);
+});
+
+test("getGroupSizes: participantCount equals groupCount yields all ones", () => {
+  assert.deepEqual(getGroupSizes(4, 4), [1, 1, 1, 1]);
+  assert.deepEqual(getGroupSizes(10, 10), Array(10).fill(1));
+});
+
+test("getGroupSizes: large even distribution (128 over 16 groups)", () => {
+  const sizes = getGroupSizes(128, 16);
+  assert.equal(sizes.length, 16);
+  for (const size of sizes) assert.equal(size, 8);
+});
+
+test("getGroupSizes: larger groups always come first", () => {
+  const sizes = getGroupSizes(14, 4); // [4, 4, 3, 3]
+  for (let i = 1; i < sizes.length; i++) {
+    assert.ok(sizes[i - 1] >= sizes[i], "sizes are non-increasing");
+  }
+});
+
+test("getGroupSizes: invariants sum and spread hold across a grid", () => {
+  for (let n = 1; n <= 30; n++) {
+    for (let g = 1; g <= n; g++) {
+      const sizes = getGroupSizes(n, g);
+      assert.equal(
+        sizes.reduce((a, b) => a + b, 0),
+        n,
+        `sum (${n}, ${g})`,
+      );
+      assert.ok(
+        Math.max(...sizes) - Math.min(...sizes) <= 1,
+        `spread (${n}, ${g})`,
+      );
+    }
+  }
+});
+
+test("getGroupIndexForDrawOrder: first draw, last draw, and group transitions", () => {
+  const sizes = getGroupSizes(14, 4); // [4, 4, 3, 3]
+  assert.equal(getGroupIndexForDrawOrder(1, sizes), 0); // first draw
+  assert.equal(getGroupIndexForDrawOrder(4, sizes), 0); // last of group 0
+  assert.equal(getGroupIndexForDrawOrder(5, sizes), 1); // first of group 1
+  assert.equal(getGroupIndexForDrawOrder(8, sizes), 1); // last of group 1
+  assert.equal(getGroupIndexForDrawOrder(9, sizes), 2); // first of group 2
+  assert.equal(getGroupIndexForDrawOrder(11, sizes), 2); // last of group 2
+  assert.equal(getGroupIndexForDrawOrder(12, sizes), 3); // first of group 3
+  assert.equal(getGroupIndexForDrawOrder(14, sizes), 3); // last draw
+});
+
+test("getGroupIndexForDrawOrder: negative draw order rejected", () => {
+  assert.throws(() => getGroupIndexForDrawOrder(-1, [4, 4, 3, 3]), /at least 1/);
+});

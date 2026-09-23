@@ -80,3 +80,21 @@ test("getQualifiedParticipants: rejects negative / non-integer count", () => {
   assert.throws(() => getQualifiedParticipants(standings, -1), /non-negative/);
   assert.throws(() => getQualifiedParticipants(standings, 1.5), /integer/);
 });
+// ---------------------------------------------------------------------------
+// Additional edge cases (Step 3)
+// ---------------------------------------------------------------------------
+
+test("getQualifiedParticipants: returns all when count equals field size", () => {
+  const standings = buildStandings();
+  assert.equal(
+    getQualifiedParticipants(standings, standings.length).length,
+    standings.length,
+  );
+});
+
+test("getQualifiedParticipants: defensive sort ignores input order", () => {
+  const standings = buildStandings();
+  const reversed = [...standings].reverse();
+  const top1 = getQualifiedParticipants(reversed, 1);
+  assert.equal(top1[0].position, 1);
+});

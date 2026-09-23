@@ -198,3 +198,189 @@ test("calculateStandings: is sorted by position ascending", () => {
     assert.ok(standings[i - 1].position < standings[i].position);
   }
 });
+// ---------------------------------------------------------------------------
+// Additional edge cases (Step 3)
+// ---------------------------------------------------------------------------
+
+test("calculateStandings: equal points resolved by goal difference", () => {
+  const participants = [
+    participant("a", 1),
+    participant("b", 2),
+    participant("c", 3),
+  ];
+  // a and b both win one match (3 pts), but a's win is by a wider margin.
+  const matches = [
+    groupMatch("A", "a", "c", 2, 0),
+    groupMatch("A", "b", "c", 1, 0),
+  ];
+  const standings = calculateStandings(matches, participants);
+  assert.equal(standings[0].participantId, "a");
+  assert.equal(standings[1].participantId, "b");
+});
+
+test("calculateStandings: equal points and GD resolved by goals for", () => {
+  const participants = [
+    participant("a", 1),
+    participant("b", 2),
+    participant("c", 3),
+  ];
+  // a wins 3-1 (+2, GF3), b wins 2-0 (+2, GF2). a ranks first on goals for.
+  const matches = [
+    groupMatch("A", "a", "c", 3, 1),
+    groupMatch("A", "b", "c", 2, 0),
+  ];
+  const standings = calculateStandings(matches, participants);
+  assert.equal(standings[0].participantId, "a");
+  assert.equal(standings[1].participantId, "b");
+});
+
+test("calculateStandings: does not mutate input arrays", () => {
+  const participants = [
+    participant("a", 1),
+    participant("b", 2),
+    participant("c", 3),
+  ];
+  const matches = [
+    groupMatch("A", "a", "b", 1, 0),
+    groupMatch("A", "b", "c", 0, 1),
+  ];
+  const pSnapshot = JSON.stringify(participants);
+  const mSnapshot = JSON.stringify(matches);
+  calculateStandings(matches, participants);
+  assert.equal(JSON.stringify(participants), pSnapshot);
+  assert.equal(JSON.stringify(matches), mSnapshot);
+});
+
+test("calculateStandings: full 4-player group final table", () => {
+  const participants = [
+    participant("a", 1),
+    participant("b", 2),
+    participant("c", 3),
+    participant("d", 4),
+  ];
+  const matches = [
+    groupMatch("A", "a", "b", 2, 1),
+    groupMatch("A", "a", "c", 1, 1),
+    groupMatch("A", "a", "d", 3, 0),
+    groupMatch("A", "b", "c", 0, 2),
+    groupMatch("A", "b", "d", 2, 2),
+    groupMatch("A", "c", "d", 1, 1),
+  ];
+  const standings = calculateStandings(matches, participants);
+  const row = (id: string) => standings.find((r) => r.participantId === id)!;
+
+  assert.deepEqual(
+    standings.map((r) => r.participantId),
+    ["a", "c", "d", "b"],
+  );
+  assert.deepEqual(row("a"), {
+    participantId: "a",
+    position: 1,
+    played: 3,
+    wins: 2,
+    draws: 1,
+    losses: 0,
+    goalsFor: 6,
+    goalsAgainst: 2,
+    goalDifference: 4,
+    points: 7,
+  });
+  assert.deepEqual(row("c"), {
+    participantId: "c",
+    position: 2,
+    played: 3,
+    wins: 1,
+    draws: 2,
+    losses: 0,
+    goalsFor: 4,
+    goalsAgainst: 2,
+    goalDifference: 2,
+    points: 5,
+  });
+  assert.deepEqual(row("d"), {
+    participantId: "d",
+    position: 3,
+    played: 3,
+    wins: 0,
+    draws: 2,
+    losses: 1,
+    goalsFor: 3,
+    goalsAgainst: 6,
+    goalDifference: -3,
+    points: 2,
+  });
+  assert.deepEqual(row("b"), {
+    participantId: "b",
+    position: 4,
+    played: 3,
+    wins: 0,
+    draws: 1,
+    losses: 2,
+    goalsFor: 3,
+    goalsAgainst: 6,
+    goalDifference: -3,
+    points: 1,
+  });
+});
+
+test("calculateStandings: invariants hold for every row", () => {
+  const participants = [
+    participant("a", 1),
+    participant("b", 2),
+    participant("c", 3),
+    participant("d", 4),
+  ];
+  const matches = [
+    groupMatch("A", "a", "b", 2, 1),
+    groupMatch("A", "a", "c", 1, 1),
+    groupMatch("A", "a", "d", 3, 0),
+    groupMatch("A", "b", "c", 0, 2),
+    groupMatch("A", "b", "d", 2, 2),
+    groupMatch("A", "c", "d", 1, 1),
+  ];
+  const standings = calculateStandings(matches, participants);
+  for (const r of standings) {
+    assert.equal(r.played, r.wins + r.draws + r.losses, `${r.participantId} played`);
+    assert.equal(
+      r.goalDifference,
+      r.goalsFor - r.goalsAgainst,
+      `${r.participantId} goalDifference`,
+    );
+    assert.equal(
+      r.points,
+      r.wins * POINTS.win + r.draws * POINTS.draw,
+      `${r.participantId} points`,
+    );
+  }
+});
+
+test("calculateStandings: rejects negative scores", () => {
+  const participants = [participant("a", 1), participant("b", 2)];
+  const matches = [groupMatch("A", "a", "b", -1, 0)];
+  assert.throws(() => calculateStandings(matches, participants), /non-negative/);
+});
+
+test("calculateStandings: rejects decimal scores", () => {
+  const participants = [participant("a", 1), participant("b", 2)];
+  const matches = [groupMatch("A", "a", "b", 1.5, 2)];
+  assert.throws(() => calculateStandings(matches, participants), /integer/);
+});
+
+test("calculateStandings: accepts valid 0-0 draw", () => {
+  const participants = [participant("a", 1), participant("b", 2)];
+  const matches = [groupMatch("A", "a", "b", 0, 0)];
+  const standings = calculateStandings(matches, participants);
+  const row = (id: string) => standings.find((r) => r.participantId === id)!;
+  assert.equal(row("a").draws, 1);
+  assert.equal(row("b").draws, 1);
+  assert.equal(row("a").goalsFor, 0);
+});
+
+test("calculateStandings: accepts valid high score", () => {
+  const participants = [participant("a", 1), participant("b", 2)];
+  const matches = [groupMatch("A", "a", "b", 9, 3)];
+  const standings = calculateStandings(matches, participants);
+  const row = (id: string) => standings.find((r) => r.participantId === id)!;
+  assert.equal(row("a").goalsFor, 9);
+  assert.equal(row("b").goalsAgainst, 9);
+});

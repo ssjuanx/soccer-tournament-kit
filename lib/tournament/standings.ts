@@ -7,6 +7,7 @@
 
 import type {
   Match,
+  MatchScore,
   Participant,
   ParticipantId,
   Standing,
@@ -30,6 +31,30 @@ export const POINTS = {
   draw: 1,
   loss: 0,
 } as const;
+
+// ---------------------------------------------------------------------------
+// Score validation
+// ---------------------------------------------------------------------------
+
+/**
+ * Validates a completed match score.
+ *
+ * A completed soccer score must have non-negative integer goals for both
+ * sides. Malformed scores (negative or fractional goals) are rejected rather
+ * than silently accepted, which would otherwise corrupt the derived standings.
+ */
+export function validateScore(score: MatchScore): void {
+  if (!Number.isInteger(score.home) || !Number.isInteger(score.away)) {
+    throw new Error(
+      `Score goals must be integers (got ${score.home}-${score.away}).`,
+    );
+  }
+  if (score.home < 0 || score.away < 0) {
+    throw new Error(
+      `Score goals must be non-negative (got ${score.home}-${score.away}).`,
+    );
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Tiebreaker order (temporary, explicitly documented)
@@ -90,6 +115,7 @@ export function calculateStandings(
   for (const match of matches) {
     if (match.stage !== "group") continue;
     if (match.score == null) continue;
+    validateScore(match.score);
     const homeId = match.homeParticipantId;
     const awayId = match.awayParticipantId;
     if (homeId == null || awayId == null) continue;
