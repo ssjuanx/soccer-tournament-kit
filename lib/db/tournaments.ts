@@ -26,12 +26,14 @@ import { groups, manualTiebreakResolutions, participants, teams, tournaments } f
 import {
   buildGroupRecords,
   compareGroupLabels,
+  DEFAULT_TOURNAMENT_NAME,
   getGroupSizes,
   groupIdForDrawOrder,
   manualResolutionIdFor,
   normalizeEntriesForSave,
   normalizeParticipantOrder,
   normalizeTiebreakerOrder,
+  normalizeTournamentMetadata,
   parseParticipantOrder,
   parseTiebreakerOrder,
   participantIdFor,
@@ -55,8 +57,6 @@ import type {
 
 /** Deterministic id of the single active tournament. */
 export const ACTIVE_TOURNAMENT_ID = "active";
-
-const DEFAULT_TOURNAMENT_NAME = "FC Tournament";
 
 /**
  * Loads the full stored setup of the active tournament.
@@ -103,6 +103,9 @@ export async function getTournamentSetup(): Promise<TournamentSetupSnapshot> {
   const savedTournament: SavedTournament = {
     id: tournament.id,
     name: tournament.name,
+    edition: tournament.edition,
+    date: tournament.date,
+    description: tournament.description,
     participantCount: tournament.participantCount,
     groupCount: tournament.groupCount,
     status: tournament.status,
@@ -173,6 +176,9 @@ export async function saveTournamentSetup(config: {
     .values({
       id: ACTIVE_TOURNAMENT_ID,
       name: DEFAULT_TOURNAMENT_NAME,
+      edition: null,
+      date: null,
+      description: null,
       participantCount: config.participantCount,
       groupCount: config.groupCount,
       status: "draft",
@@ -319,6 +325,46 @@ export async function saveParticipants(
   } else {
     await db.delete(teams).where(eq(teams.tournamentId, ACTIVE_TOURNAMENT_ID));
   }
+}
+
+/**
+ * Persists the active tournament's identity metadata (name, edition, date,
+ * description). Kept separate from `saveTournamentSetup` because metadata is
+ * editable independently of the participant/group counts and is never locked
+ * by fixtures. The inputs are normalized (blank name falls back to the default,
+ * blank optional fields become `null`). Only the metadata columns are touched.
+ *
+ * Throws when no active tournament exists (the setup must be generated first).
+ */
+export async function saveTournamentMetadata(input: {
+  name: string;
+  edition: string;
+  date: string;
+  description: string;
+}): Promise<void> {
+  const [existing] = await db
+    .select({ id: tournaments.id })
+    .from(tournaments)
+    .where(eq(tournaments.id, ACTIVE_TOURNAMENT_ID))
+    .limit(1);
+
+  if (!existing) {
+    throw new Error(
+      "No active tournament found. Generate the setup before saving metadata.",
+    );
+  }
+
+  const normalized = normalizeTournamentMetadata(input);
+
+  await db
+    .update(tournaments)
+    .set({
+      name: normalized.name,
+      edition: normalized.edition,
+      date: normalized.date,
+      description: normalized.description,
+    })
+    .where(eq(tournaments.id, ACTIVE_TOURNAMENT_ID));
 }
 
 /**

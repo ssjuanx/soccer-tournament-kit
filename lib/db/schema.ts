@@ -49,6 +49,14 @@ export const KNOCKOUT_ROUNDS = [
 export const tournaments = pgTable("tournaments", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
+  // Tournament identity metadata. All optional except `name`; a fresh setup
+  // keeps the default name and leaves edition/date/description blank until the
+  // administrator fills them in. Stored as plain `text` to stay consistent with
+  // the text-based pattern used elsewhere (and to avoid date/timezone friction
+  // with the Neon HTTP driver); `date` holds an ISO `YYYY-MM-DD` string.
+  edition: text("edition"),
+  date: text("date"),
+  description: text("description"),
   participantCount: integer("participant_count").notNull(),
   groupCount: integer("group_count").notNull(),
   status: text("status", { enum: TOURNAMENT_STATUSES })

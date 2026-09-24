@@ -53,6 +53,9 @@ function snapshot(
     tournament: {
       id: "t",
       name: "T",
+      edition: null,
+      date: null,
+      description: null,
       participantCount,
       groupCount,
       status: "draft",

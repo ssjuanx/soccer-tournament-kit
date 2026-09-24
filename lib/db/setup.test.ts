@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   buildGroupRecords,
   compareGroupLabels,
+  DEFAULT_TOURNAMENT_NAME,
   entriesHaveData,
   groupRecordId,
   groupIdForDrawOrder,
@@ -12,6 +13,7 @@ import {
   normalizeEntriesForSave,
   normalizeParticipantOrder,
   normalizeTiebreakerOrder,
+  normalizeTournamentMetadata,
   participantIdFor,
   parseParticipantOrder,
   parseScoringRules,
@@ -128,6 +130,9 @@ test("mapSetupToEntries: maps participants to entries keyed by draw order", () =
     tournament: {
       id: "active",
       name: "FC Tournament",
+      edition: null,
+      date: null,
+      description: null,
       participantCount: 2,
       groupCount: 2,
       status: "draft",
@@ -457,4 +462,38 @@ test("normalizeParticipantOrder: dedupes, drops blanks, preserves order", () => 
     ["a", "b", "c"],
   );
   assert.deepEqual(normalizeParticipantOrder([]), []);
+});
+
+test("normalizeTournamentMetadata: blank name falls back to default", () => {
+  assert.deepEqual(
+    normalizeTournamentMetadata({
+      name: "   ",
+      edition: "",
+      date: "",
+      description: "",
+    }),
+    {
+      name: DEFAULT_TOURNAMENT_NAME,
+      edition: null,
+      date: null,
+      description: null,
+    },
+  );
+});
+
+test("normalizeTournamentMetadata: trims fields, keeps blanks as null", () => {
+  assert.deepEqual(
+    normalizeTournamentMetadata({
+      name: "  Summer Cup  ",
+      edition: " 2026 Edition ",
+      date: "2026-06-01",
+      description: "  Friendly round-robin ",
+    }),
+    {
+      name: "Summer Cup",
+      edition: "2026 Edition",
+      date: "2026-06-01",
+      description: "Friendly round-robin",
+    },
+  );
 });

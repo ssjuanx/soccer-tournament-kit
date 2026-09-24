@@ -40,6 +40,10 @@ import type {
 export interface SavedTournament {
   id: string;
   name: string;
+  /** Optional identity metadata (blank until the administrator sets them). */
+  edition: string | null;
+  date: string | null;
+  description: string | null;
   participantCount: number;
   groupCount: number;
   status: string;
@@ -269,6 +273,40 @@ export function uniqueTeamNames(normalized: PersistableEntry[]): string[] {
 
 // Re-exported so the repository can compute group sizes without a second import.
 export { getGroupSizes };
+
+// ---------------------------------------------------------------------------
+// Tournament metadata: name / edition / date / description
+// ---------------------------------------------------------------------------
+
+/** Default tournament name used when the administrator leaves the name blank. */
+export const DEFAULT_TOURNAMENT_NAME = "FC Tournament";
+
+/**
+ * Normalizes raw tournament-identity metadata from the admin form.
+ *
+ * `name` is required: a blank/whitespace name falls back to
+ * `DEFAULT_TOURNAMENT_NAME`. `edition` and `description` are trimmed and stored
+ * as `null` when blank. `date` is trimmed and stored as `null` when blank; a
+ * non-blank value is kept as-is (the UI uses an `<input type="date">`, so it is
+ * already `YYYY-MM-DD`). Returns the canonical, persistable shape.
+ */
+export function normalizeTournamentMetadata(input: {
+  name: string;
+  edition: string;
+  date: string;
+  description: string;
+}): {
+  name: string;
+  edition: string | null;
+  date: string | null;
+  description: string | null;
+} {
+  const name = input.name.trim() || DEFAULT_TOURNAMENT_NAME;
+  const edition = input.edition.trim() || null;
+  const date = input.date.trim() || null;
+  const description = input.description.trim() || null;
+  return { name, edition, date, description };
+}
 
 // ---------------------------------------------------------------------------
 // Tournament rules: scoring config & tiebreaker order

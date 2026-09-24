@@ -28,6 +28,7 @@ import {
   getTournamentSetup,
   saveManualTiebreakResolution,
   saveParticipants,
+  saveTournamentMetadata,
   saveTournamentRules,
   saveTournamentSetup,
 } from "./tournaments.ts";
@@ -189,6 +190,36 @@ export async function saveMatchScoreAction(
     return {
       ok: false,
       error: error instanceof Error ? error.message : "Failed to save the score.",
+    };
+  }
+}
+
+/**
+ * Persists the active tournament's identity metadata (name, edition, date,
+ * description). Inputs are strings straight from the admin form; the repository
+ * normalizes them (blank name falls back to the default, blank optional fields
+ * become `null`). Metadata is editable at any time, even after fixtures are
+ * locked.
+ */
+export async function saveTournamentMetadataAction(
+  name: string,
+  edition: string,
+  date: string,
+  description: string,
+): Promise<ActionResult> {
+  if (typeof name !== "string" || typeof edition !== "string" || typeof date !== "string" || typeof description !== "string") {
+    return { ok: false, error: "Invalid metadata input." };
+  }
+  try {
+    await saveTournamentMetadata({ name, edition, date, description });
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : "Failed to save tournament metadata.",
     };
   }
 }
