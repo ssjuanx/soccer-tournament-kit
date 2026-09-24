@@ -31,3 +31,4 @@ next-env.d.ts
 
 # private / internal documents
 context.md
+.neon

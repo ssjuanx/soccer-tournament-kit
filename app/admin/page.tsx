@@ -1,8 +1,18 @@
 import AdminSetup from "./admin-setup";
+import { getTournamentSetup } from "@/lib/db/tournaments";
+import { getGroupMatches } from "@/lib/db/matches";
 
 export const metadata = { title: "Admin" };
 
-export default function AdminPage() {
+// Always read the latest persisted setup and fixtures at request time (never
+// prerendered).
+export const dynamic = "force-dynamic";
+
+export default async function AdminPage() {
+  const [initialSetup, initialMatches] = await Promise.all([
+    getTournamentSetup(),
+    getGroupMatches(),
+  ]);
   return (
     <div className="space-y-6">
       <div>
@@ -11,7 +21,7 @@ export default function AdminPage() {
           Configure the tournament and enter the drawn participants and teams.
         </p>
       </div>
-      <AdminSetup />
+      <AdminSetup initialSetup={initialSetup} initialMatches={initialMatches} />
     </div>
   );
 }
