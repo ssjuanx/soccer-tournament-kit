@@ -8,7 +8,7 @@ import {
   validateSetupInput,
   type SetupPlan,
 } from "@/lib/tournament/draw";
-import type { Match, TiebreakerKey } from "@/lib/tournament/types";
+import type { Match, ParticipantId, TiebreakerKey } from "@/lib/tournament/types";
 import {
   compareGroupLabels,
   entriesHaveData,
@@ -24,6 +24,7 @@ import {
   clearFixturesAction,
   generateFixturesAction,
   generateSetupAction,
+  saveManualTiebreakResolutionAction,
   saveMatchScoreAction,
   saveParticipantsAction,
   saveTournamentRulesAction,
@@ -137,6 +138,39 @@ export default function AdminSetup({
     }
     return map;
   }, [initialSetup.groups]);
+
+  // Participants grouped by groupId (draw order preserved), for the manual
+  // tiebreak resolution panel. Stable while locked.
+  const participantsByGroup = useMemo(() => {
+    const map = new Map<string, SavedParticipant[]>();
+    for (const p of initialSetup.participants) {
+      if (!p.groupId) continue;
+      const list = map.get(p.groupId);
+      if (list) {
+        list.push(p);
+      } else {
+        map.set(p.groupId, [p]);
+      }
+    }
+    return map;
+  }, [initialSetup.participants]);
+
+  // Manual tiebreak orders per group, seeded from the persisted resolutions.
+  // A group without a saved resolution defaults to draw order (the admin can
+  // reorder from there). Only relevant while `manual` is in the tiebreaker order.
+  const [manualOrders, setManualOrders] = useState<Record<string, ParticipantId[]>>(
+    () => {
+      const seed: Record<string, ParticipantId[]> = {};
+      for (const resolution of initialSetup.manualResolutions) {
+        seed[resolution.groupId] = [...resolution.participantOrder];
+      }
+      return seed;
+    },
+  );
+  const [manualSaving, setManualSaving] = useState<Record<string, boolean>>({});
+  const [manualStatus, setManualStatus] = useState<
+    Record<string, "saved" | "saving" | "unsaved" | "error">
+  >({});
 
   // Mark the form dirty after the first render (which rehydrates from the DB).
   // Any later change to the entries or plan means there are unsaved edits.
@@ -318,6 +352,43 @@ export default function AdminSetup({
     setRulesStatus("unsaved");
   }
 
+  // --- Manual tiebreak resolution handlers ---
+
+  /** Returns the editable order for a group (saved resolution or draw order). */
+  function manualOrderFor(groupId: string): ParticipantId[] {
+    const existing = manualOrders[groupId];
+    if (existing && existing.length > 0) return existing;
+    const groupParticipants = participantsByGroup.get(groupId) ?? [];
+    return groupParticipants.map((p) => p.id);
+  }
+
+  function moveManualParticipant(
+    groupId: string,
+    index: number,
+    direction: -1 | 1,
+  ) {
+    const order = [...manualOrderFor(groupId)];
+    const target = index + direction;
+    if (target < 0 || target >= order.length) return;
+    [order[index], order[target]] = [order[target], order[index]];
+    setManualOrders((prev) => ({ ...prev, [groupId]: order }));
+    setManualStatus((prev) => ({ ...prev, [groupId]: "unsaved" }));
+  }
+
+  async function handleSaveManualResolution(groupId: string) {
+    const order = manualOrderFor(groupId);
+    setManualSaving((prev) => ({ ...prev, [groupId]: true }));
+    setManualStatus((prev) => ({ ...prev, [groupId]: "saving" }));
+    const result = await saveManualTiebreakResolutionAction(groupId, order);
+    setManualSaving((prev) => ({ ...prev, [groupId]: false }));
+    if (result.ok) {
+      setManualStatus((prev) => ({ ...prev, [groupId]: "saved" }));
+    } else {
+      setManualStatus((prev) => ({ ...prev, [groupId]: "error" }));
+      setError(result.error);
+    }
+  }
+
   function updateScoreInput(
     matchId: string,
     side: "home" | "away",
@@ -446,6 +517,20 @@ export default function AdminSetup({
           onMoveTiebreaker={moveTiebreaker}
           onToggleTiebreaker={toggleTiebreaker}
           onSaveRules={handleSaveRules}
+        />
+      )}
+
+      {plan && tiebreakerOrder.includes("manual") && (
+        <ManualTiebreakSection
+          groups={initialSetup.groups}
+          participantsByGroup={participantsByGroup}
+          participantById={participantById}
+          groupLabelById={groupLabelById}
+          manualOrderFor={manualOrderFor}
+          savingByGroup={manualSaving}
+          statusByGroup={manualStatus}
+          onMove={moveManualParticipant}
+          onSave={handleSaveManualResolution}
         />
       )}
 
@@ -726,9 +811,16 @@ function SaveStatusBadge({
 const TIEBREAKER_LABELS: Record<TiebreakerKey, string> = {
   goal_difference: "Goal difference",
   goals_for: "Goals for",
+  head_to_head: "Head-to-head",
+  manual: "Manual (admin decides)",
 };
 
-const ALL_TIEBREAKER_OPTIONS: TiebreakerKey[] = ["goal_difference", "goals_for"];
+const ALL_TIEBREAKER_OPTIONS: TiebreakerKey[] = [
+  "goal_difference",
+  "goals_for",
+  "head_to_head",
+  "manual",
+];
 
 interface RulesSectionProps {
   winPointsRaw: string;
@@ -883,6 +975,137 @@ function RulesSection({
           {rulesStatus === "saving" ? "Saving…" : "Save rules"}
         </button>
         <SaveStatusBadge status={rulesStatus} />
+      </div>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Manual tiebreak resolution
+// ---------------------------------------------------------------------------
+
+interface ManualTiebreakSectionProps {
+  groups: { id: string; label: string }[];
+  participantsByGroup: Map<string, SavedParticipant[]>;
+  participantById: Map<string, SavedParticipant>;
+  groupLabelById: Map<string, string>;
+  manualOrderFor: (groupId: string) => ParticipantId[];
+  savingByGroup: Record<string, boolean>;
+  statusByGroup: Record<string, "saved" | "saving" | "unsaved" | "error">;
+  onMove: (groupId: string, index: number, direction: -1 | 1) => void;
+  onSave: (groupId: string) => void;
+}
+
+/**
+ * Manual tiebreak resolution panel. Shown only when the `manual` tiebreaker is
+ * enabled. For each group with participants, the administrator reorders the
+ * participants (best first) and saves; that ordering is consulted by the
+ * `manual` tiebreaker when a tied cohort is reached. Until a resolution is
+ * saved, ties in such a group are shown as "tiebreak pending".
+ */
+function ManualTiebreakSection({
+  groups,
+  participantsByGroup,
+  participantById,
+  groupLabelById,
+  manualOrderFor,
+  savingByGroup,
+  statusByGroup,
+  onMove,
+  onSave,
+}: ManualTiebreakSectionProps) {
+  const visibleGroups = groups
+    .filter((g) => (participantsByGroup.get(g.id)?.length ?? 0) > 0)
+    .sort((a, b) => compareGroupLabels(a.label, b.label));
+
+  return (
+    <section aria-labelledby="manual-heading" className="space-y-4">
+      <h2 id="manual-heading" className="text-lg font-semibold text-slate-900">
+        Manual tiebreak resolutions
+      </h2>
+      <p className="text-sm text-slate-600">
+        The <em>manual</em> tiebreaker is enabled. For each group, order the
+        participants best-first. When a group has a tied cohort that reaches the
+        manual tiebreaker, this ordering resolves it; until then, ties in such a
+        group are shown as <span className="font-medium">tiebreak pending</span>.
+      </p>
+      <div className="space-y-4">
+        {visibleGroups.map((group) => {
+          const order = manualOrderFor(group.id);
+          const label = groupLabelById.get(group.id) ?? group.label;
+          const saving = savingByGroup[group.id] === true;
+          const status = statusByGroup[group.id];
+          return (
+            <div key={group.id} className="rounded-lg border border-slate-200 bg-white p-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-slate-900">
+                  Group {label}
+                </h3>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => onSave(group.id)}
+                    disabled={saving}
+                    className="rounded-md bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-200 focus:outline-none focus:ring-2 focus:ring-slate-500 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {saving ? "Saving…" : "Save order"}
+                  </button>
+                  {status === "saving" ? (
+                    <span className="text-xs text-slate-500">Saving…</span>
+                  ) : status === "unsaved" ? (
+                    <span className="text-xs font-medium text-amber-600">Unsaved</span>
+                  ) : status === "error" ? (
+                    <span className="text-xs font-medium text-red-600">Error</span>
+                  ) : status === "saved" ? (
+                    <span className="text-xs font-medium text-green-600">Saved</span>
+                  ) : null}
+                </div>
+              </div>
+              <ol className="mt-2 space-y-1">
+                {order.map((id, index) => {
+                  const participant = participantById.get(id);
+                  return (
+                    <li
+                      key={id}
+                      className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2"
+                    >
+                      <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-slate-100 text-xs font-semibold text-slate-600">
+                        {index + 1}
+                      </span>
+                      <span className="flex-1 text-sm text-slate-900">
+                        {participant?.name ?? id}
+                        {participant?.teamName ? (
+                          <span className="text-slate-500">
+                            {" "}
+                            ({participant.teamName})
+                          </span>
+                        ) : null}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => onMove(group.id, index, -1)}
+                        disabled={index === 0}
+                        aria-label={`Move ${participant?.name ?? id} up`}
+                        className="rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        ↑
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onMove(group.id, index, 1)}
+                        disabled={index === order.length - 1}
+                        aria-label={`Move ${participant?.name ?? id} down`}
+                        className="rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        ↓
+                      </button>
+                    </li>
+                  );
+                })}
+              </ol>
+            </div>
+          );
+        })}
       </div>
     </section>
   );

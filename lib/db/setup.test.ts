@@ -7,12 +7,16 @@ import {
   entriesHaveData,
   groupRecordId,
   groupIdForDrawOrder,
+  manualResolutionIdFor,
   mapSetupToEntries,
   normalizeEntriesForSave,
+  normalizeParticipantOrder,
   normalizeTiebreakerOrder,
   participantIdFor,
+  parseParticipantOrder,
   parseScoringRules,
   parseTiebreakerOrder,
+  serializeParticipantOrder,
   serializeTiebreakerOrder,
   teamIdFor,
   uniqueTeamNames,
@@ -110,6 +114,7 @@ test("mapSetupToEntries: empty snapshot yields blank state", () => {
     tournament: null,
     groups: [],
     participants: [],
+    manualResolutions: [],
   };
   assert.deepEqual(mapSetupToEntries(snap), {
     participantCount: 0,
@@ -139,6 +144,7 @@ test("mapSetupToEntries: maps participants to entries keyed by draw order", () =
       { id: "active:participant:1", name: "Alice", drawOrder: 1, teamName: "Barca", groupId: "active:group:A" },
       { id: "active:participant:2", name: "Bob", drawOrder: 2, teamName: null, groupId: "active:group:B" },
     ],
+    manualResolutions: [],
   };
   const result = mapSetupToEntries(snap);
   assert.equal(result.participantCount, 2);
@@ -291,15 +297,22 @@ test("parseTiebreakerOrder: non-array -> default", () => {
 test("parseTiebreakerOrder: unknown keys filtered, duplicates removed", () => {
   assert.deepEqual(
     parseTiebreakerOrder(
-      '["goals_for","head_to_head","goals_for","goal_difference"]',
+      '["goals_for","fair_play","goals_for","goal_difference"]',
     ),
     ["goals_for", "goal_difference"],
   );
 });
 
+test("parseTiebreakerOrder: head_to_head and manual are valid keys", () => {
+  assert.deepEqual(
+    parseTiebreakerOrder('["head_to_head","manual","goal_difference"]'),
+    ["head_to_head", "manual", "goal_difference"],
+  );
+});
+
 test("parseTiebreakerOrder: all-unknown -> default", () => {
   assert.deepEqual(
-    parseTiebreakerOrder('["head_to_head","fair_play"]'),
+    parseTiebreakerOrder('["fair_play","coin_toss"]'),
     ["goal_difference", "goals_for"],
   );
 });
@@ -323,10 +336,17 @@ test("normalizeTiebreakerOrder: filters unknown keys", () => {
   assert.deepEqual(
     normalizeTiebreakerOrder([
       "goals_for",
-      "head_to_head" as never,
+      "fair_play" as never,
       "goal_difference",
     ]),
     ["goals_for", "goal_difference"],
+  );
+});
+
+test("normalizeTiebreakerOrder: keeps head_to_head and manual", () => {
+  assert.deepEqual(
+    normalizeTiebreakerOrder(["head_to_head", "manual"]),
+    ["head_to_head", "manual"],
   );
 });
 
@@ -382,4 +402,59 @@ test("parseScoringRules: rejects non-integers", () => {
       .message,
     /Loss points/,
   );
+});
+
+// ---------------------------------------------------------------------------
+// Manual tiebreak resolution: participant-order serialization & parsing
+// ---------------------------------------------------------------------------
+
+test("manualResolutionIdFor: deterministic, group-derived", () => {
+  assert.equal(
+    manualResolutionIdFor("active", "active:group:A"),
+    "active:resolution:active:group:A",
+  );
+});
+
+test("serializeParticipantOrder: JSON text", () => {
+  assert.equal(
+    serializeParticipantOrder(["a", "b", "c"]),
+    '["a","b","c"]',
+  );
+});
+
+test("parseParticipantOrder: round-trips a valid array", () => {
+  assert.deepEqual(
+    parseParticipantOrder(serializeParticipantOrder(["x", "y"])),
+    ["x", "y"],
+  );
+});
+
+test("parseParticipantOrder: malformed JSON -> empty", () => {
+  assert.deepEqual(parseParticipantOrder("not json"), []);
+  assert.deepEqual(parseParticipantOrder("{"), []);
+});
+
+test("parseParticipantOrder: non-array -> empty", () => {
+  assert.deepEqual(parseParticipantOrder('"a"'), []);
+  assert.deepEqual(parseParticipantOrder("42"), []);
+});
+
+test("parseParticipantOrder: drops non-string entries", () => {
+  assert.deepEqual(
+    parseParticipantOrder('["a",1,true,null,"b"]'),
+    ["a", "b"],
+  );
+});
+
+test("parseParticipantOrder: null/blank -> empty", () => {
+  assert.deepEqual(parseParticipantOrder(null), []);
+  assert.deepEqual(parseParticipantOrder(""), []);
+});
+
+test("normalizeParticipantOrder: dedupes, drops blanks, preserves order", () => {
+  assert.deepEqual(
+    normalizeParticipantOrder(["a", "", "b", "a", "c"]),
+    ["a", "b", "c"],
+  );
+  assert.deepEqual(normalizeParticipantOrder([]), []);
 });

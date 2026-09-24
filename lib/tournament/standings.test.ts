@@ -58,6 +58,7 @@ test("calculateStandings: win/draw/loss and goal totals", () => {
     goalsAgainst: 3,
     goalDifference: -1,
     points: 3,
+    unresolved: false,
   });
   assert.equal(row("b").points, 1);
   assert.equal(row("b").draws, 1);
@@ -284,6 +285,7 @@ test("calculateStandings: full 4-player group final table", () => {
     goalsAgainst: 2,
     goalDifference: 4,
     points: 7,
+    unresolved: false,
   });
   assert.deepEqual(row("c"), {
     participantId: "c",
@@ -296,6 +298,7 @@ test("calculateStandings: full 4-player group final table", () => {
     goalsAgainst: 2,
     goalDifference: 2,
     points: 5,
+    unresolved: false,
   });
   assert.deepEqual(row("d"), {
     participantId: "d",
@@ -308,6 +311,7 @@ test("calculateStandings: full 4-player group final table", () => {
     goalsAgainst: 6,
     goalDifference: -3,
     points: 2,
+    unresolved: false,
   });
   assert.deepEqual(row("b"), {
     participantId: "b",
@@ -320,6 +324,7 @@ test("calculateStandings: full 4-player group final table", () => {
     goalsAgainst: 6,
     goalDifference: -3,
     points: 1,
+    unresolved: false,
   });
 });
 

@@ -48,19 +48,46 @@ export interface ScoringConfig {
 }
 
 /**
- * A configurable group-stage tiebreaker key. Only the relative order of
- * `goal_difference` and `goals_for` is configurable; points are always the
- * primary sort and original draw order is always the final deterministic
- * fallback. Head-to-head is intentionally not implemented yet.
+ * A configurable group-stage tiebreaker key.
+ *
+ *   - `goal_difference` / `goals_for` — statistical, applied to the whole
+ *     group's accumulated numbers.
+ *   - `head_to_head` — re-ranks a tied cohort using a mini-table built only
+ *     from the matches played between the cohort's members (requires every
+ *     pair in the cohort to have a completed match, otherwise it is skipped).
+ *   - `manual` — the administrator's explicit ordering of a group. It is
+ *     terminal: when reached, either the stored manual order fully resolves
+ *     the cohort, or the cohort is left *unresolved* (shared positions) until
+ *     the admin provides one. It should therefore be configured last.
+ *
+ * Points are always the primary sort and original draw order is always the
+ * final deterministic fallback (when no `manual` tiebreaker intervenes).
  */
-export type TiebreakerKey = "goal_difference" | "goals_for";
+export type TiebreakerKey =
+  | "goal_difference"
+  | "goals_for"
+  | "head_to_head"
+  | "manual";
 
 /**
  * The ordered list of tiebreakers applied (after points, before draw order).
  * A subset/permutation of `TiebreakerKey[]`; the engine applies them in the
- * given order and falls back to draw order if still tied.
+ * given order and falls back to draw order if still tied (unless `manual` is
+ * reached without a stored resolution, in which case the tie is unresolved).
  */
 export type TiebreakerOrder = TiebreakerKey[];
+
+/**
+ * An administrator's manual tiebreak resolution for one group: an explicit
+ * ordered list of the group's participant ids, best first. When the `manual`
+ * tiebreaker is reached for a tied cohort, the cohort's members are ordered by
+ * their position in this list. If any cohort member is missing from the list
+ * (or no resolution is stored for the group), the cohort is marked unresolved.
+ */
+export interface ManualTiebreakResolution {
+  groupId: GroupId;
+  participantOrder: ParticipantId[];
+}
 
 // ---------------------------------------------------------------------------
 // Tournament lifecycle
@@ -187,6 +214,14 @@ export interface StandingRow {
   goalsAgainst: number;
   goalDifference: number;
   points: number;
+  /**
+   * `true` when this row is part of a tied cohort that could not be ordered
+   * (the `manual` tiebreaker was reached but no valid resolution was stored).
+   * Such rows share a position with the other unresolved cohort members and
+   * are displayed as "tiebreak pending" until the administrator resolves them.
+   * Always `false` when no `manual` tiebreaker is configured.
+   */
+  unresolved: boolean;
 }
 
 /** A full group standings table, ordered by `position`. */

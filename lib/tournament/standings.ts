@@ -6,6 +6,8 @@
  */
 
 import type {
+  GroupId,
+  ManualTiebreakResolution,
   Match,
   MatchScore,
   Participant,
@@ -16,6 +18,7 @@ import type {
   TiebreakerKey,
   TiebreakerOrder,
 } from "./types";
+import { rankRows } from "./tiebreakers.ts";
 
 // ---------------------------------------------------------------------------
 // Soccer scoring
@@ -58,6 +61,8 @@ export const DEFAULT_TIEBREAKER_ORDER: TiebreakerOrder = [
 export const ALL_TIEBREAKER_KEYS: readonly TiebreakerKey[] = [
   "goal_difference",
   "goals_for",
+  "head_to_head",
+  "manual",
 ];
 
 // ---------------------------------------------------------------------------
@@ -92,15 +97,14 @@ export function validateScore(score: MatchScore): void {
  * Group-stage ranking order:
  *
  *   1. Points (descending) — always primary, never configurable.
- *   2. The configured `TiebreakerOrder` (descending for each key). Only the
- *      relative order of `goal_difference` and `goals_for` is configurable;
- *      defaults to goal difference, then goals for.
+ *   2. The configured `TiebreakerOrder`, applied recursively to each tied
+ *      cohort. Defaults to goal difference, then goals for. `head_to_head`
+ *      re-ranks a cohort on a mini-table of matches between its members;
+ *      `manual` applies the administrator's stored ordering (terminal — either
+ *      it resolves the cohort or leaves it unresolved).
  *   3. Original draw order (ascending) — always the final deterministic
- *      fallback (lower drawOrder = drawn earlier = higher rank).
- *
- * Head-to-head is intentionally NOT implemented yet (not required by the
- * current product context). If participants are still tied after points and
- * all configured tiebreakers, the participant drawn earlier ranks higher.
+ *      fallback (lower drawOrder = drawn earlier = higher rank), used when no
+ *      configured tiebreaker (including `manual`) resolves a tie.
  */
 
 interface Accumulator {
@@ -130,9 +134,14 @@ function createAccumulator(): Accumulator {
  * `options.scoring` overrides the points awarded per result (defaults to
  * standard soccer 3/1/0). `options.tiebreakerOrder` overrides the order of
  * tiebreakers applied after points (defaults to goal difference, then goals
- * for). Points are always the primary sort and draw order is always the final
- * fallback, regardless of the config. Both options default so existing call
- * sites and tests remain backward-compatible.
+ * for). Points are always the primary sort; draw order is always the final
+ * fallback unless the `manual` tiebreaker is reached without a resolution.
+ *
+ * `options.manualResolutions` supplies the administrator's manual orderings
+ * (one per group) used by the `manual` tiebreaker. `options.groupId` overrides
+ * which group's resolution is consulted (it otherwise defaults to the first
+ * participant's `groupId`). Both options default so existing call sites and
+ * tests remain backward-compatible.
  */
 export function calculateStandings(
   matches: Match[],
@@ -140,6 +149,8 @@ export function calculateStandings(
   options?: {
     scoring?: ScoringConfig;
     tiebreakerOrder?: TiebreakerOrder;
+    manualResolutions?: ManualTiebreakResolution[];
+    groupId?: GroupId | null;
   },
 ): Standing {
   const scoring = options?.scoring ?? DEFAULT_SCORING_CONFIG;
@@ -206,31 +217,21 @@ export function calculateStandings(
         acc.wins * scoring.winPoints +
         acc.draws * scoring.drawPoints +
         acc.losses * scoring.lossPoints,
+      unresolved: false,
     };
   });
 
-  rows.sort((a, b) => {
-    // Points are always the primary sort (descending).
-    if (a.points !== b.points) return b.points - a.points;
-    // Apply each configured tiebreaker in order (all descending).
-    for (const key of tiebreakerOrder) {
-      if (key === "goal_difference") {
-        if (a.goalDifference !== b.goalDifference) {
-          return b.goalDifference - a.goalDifference;
-        }
-      } else if (key === "goals_for") {
-        if (a.goalsFor !== b.goalsFor) return b.goalsFor - a.goalsFor;
-      }
-    }
-    // Deterministic fallback: earlier draw order ranks first.
-    const aDraw = drawOrderByParticipant.get(a.participantId);
-    const bDraw = drawOrderByParticipant.get(b.participantId);
-    return (aDraw ?? Number.POSITIVE_INFINITY) - (bDraw ?? Number.POSITIVE_INFINITY);
-  });
+  // Cohort-based ranking (Phase 2). The resolver assigns positions and the
+  // unresolved flag in place and returns the rows in ranked order.
+  const groupId =
+    options?.groupId ?? participants.find((p) => p.groupId != null)?.groupId ?? null;
 
-  rows.forEach((row, index) => {
-    row.position = index + 1;
+  return rankRows(rows, {
+    drawOrderById: drawOrderByParticipant,
+    matches,
+    scoring,
+    tiebreakerOrder,
+    manualResolutions: options?.manualResolutions,
+    groupId,
   });
-
-  return rows;
 }

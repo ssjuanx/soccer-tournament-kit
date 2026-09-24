@@ -63,6 +63,7 @@ function snapshot(
     },
     groups,
     participants,
+    manualResolutions: [],
   };
 }
 
@@ -75,6 +76,7 @@ test("isReadyForFixtures: false when no tournament", () => {
     tournament: null,
     groups: [],
     participants: [],
+    manualResolutions: [],
   };
   assert.equal(isReadyForFixtures(snap), false);
 });
@@ -101,7 +103,12 @@ test("isReadyForFixtures: true for a realistic 14/4 setup", () => {
 
 test("buildGroupStageMatches: empty when no tournament", () => {
   assert.deepEqual(
-    buildGroupStageMatches({ tournament: null, groups: [], participants: [] }),
+    buildGroupStageMatches({
+      tournament: null,
+      groups: [],
+      participants: [],
+      manualResolutions: [],
+    }),
     [],
   );
 });

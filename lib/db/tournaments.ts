@@ -22,16 +22,20 @@
 import { and, asc, eq, notInArray } from "drizzle-orm";
 
 import { db } from "./client.ts";
-import { groups, participants, teams, tournaments } from "./schema.ts";
+import { groups, manualTiebreakResolutions, participants, teams, tournaments } from "./schema.ts";
 import {
   buildGroupRecords,
   compareGroupLabels,
   getGroupSizes,
   groupIdForDrawOrder,
+  manualResolutionIdFor,
   normalizeEntriesForSave,
+  normalizeParticipantOrder,
   normalizeTiebreakerOrder,
-  participantIdFor,
+  parseParticipantOrder,
   parseTiebreakerOrder,
+  participantIdFor,
+  serializeParticipantOrder,
   serializeTiebreakerOrder,
   teamIdFor,
   uniqueTeamNames,
@@ -41,7 +45,13 @@ import {
   type SavedTournament,
   type TournamentSetupSnapshot,
 } from "./setup.ts";
-import type { ScoringConfig, TiebreakerOrder } from "../tournament/types.ts";
+import type {
+  GroupId,
+  ManualTiebreakResolution,
+  ParticipantId,
+  ScoringConfig,
+  TiebreakerOrder,
+} from "../tournament/types.ts";
 
 /** Deterministic id of the single active tournament. */
 export const ACTIVE_TOURNAMENT_ID = "active";
@@ -65,7 +75,7 @@ export async function getTournamentSetup(): Promise<TournamentSetupSnapshot> {
     .limit(1);
 
   if (!tournament) {
-    return { tournament: null, groups: [], participants: [] };
+    return { tournament: null, groups: [], participants: [], manualResolutions: [] };
   }
 
   const groupRows = await db
@@ -110,10 +120,27 @@ export async function getTournamentSetup(): Promise<TournamentSetupSnapshot> {
     groupId: p.groupId,
   }));
 
+  const resolutionRows = await db
+    .select({
+      id: manualTiebreakResolutions.id,
+      groupId: manualTiebreakResolutions.groupId,
+      participantOrder: manualTiebreakResolutions.participantOrder,
+    })
+    .from(manualTiebreakResolutions)
+    .where(eq(manualTiebreakResolutions.tournamentId, ACTIVE_TOURNAMENT_ID));
+
+  const manualResolutions: ManualTiebreakResolution[] = resolutionRows
+    .map((r) => ({
+      groupId: r.groupId,
+      participantOrder: parseParticipantOrder(r.participantOrder),
+    }))
+    .filter((r) => r.participantOrder.length > 0);
+
   return {
     tournament: savedTournament,
     groups: groupList,
     participants: savedParticipants,
+    manualResolutions,
   };
 }
 
@@ -333,4 +360,52 @@ export async function saveTournamentRules(
       tiebreakerOrder: serializeTiebreakerOrder(normalizedOrder),
     })
     .where(eq(tournaments.id, ACTIVE_TOURNAMENT_ID));
+}
+
+/**
+ * Persists (or clears) the administrator's manual tiebreak ordering for one
+ * group. The `participantOrder` is normalized (de-duplicated, non-empty ids
+ * only) and upserted by deterministic id. Passing an empty order deletes the
+ * row so the group returns to the unresolved/auto-fallback behaviour.
+ *
+ * Throws when no active tournament exists (the setup must be generated first).
+ */
+export async function saveManualTiebreakResolution(
+  groupId: GroupId,
+  participantOrder: ParticipantId[],
+): Promise<void> {
+  const [existing] = await db
+    .select({ id: tournaments.id })
+    .from(tournaments)
+    .where(eq(tournaments.id, ACTIVE_TOURNAMENT_ID))
+    .limit(1);
+
+  if (!existing) {
+    throw new Error(
+      "No active tournament found. Generate the setup before saving a manual tiebreak.",
+    );
+  }
+
+  const normalized = normalizeParticipantOrder(participantOrder);
+  const id = manualResolutionIdFor(ACTIVE_TOURNAMENT_ID, groupId);
+
+  if (normalized.length === 0) {
+    await db
+      .delete(manualTiebreakResolutions)
+      .where(eq(manualTiebreakResolutions.id, id));
+    return;
+  }
+
+  await db
+    .insert(manualTiebreakResolutions)
+    .values({
+      id,
+      tournamentId: ACTIVE_TOURNAMENT_ID,
+      groupId,
+      participantOrder: serializeParticipantOrder(normalized),
+    })
+    .onConflictDoUpdate({
+      target: manualTiebreakResolutions.id,
+      set: { participantOrder: serializeParticipantOrder(normalized) },
+    });
 }

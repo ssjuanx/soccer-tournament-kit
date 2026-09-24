@@ -15,6 +15,13 @@
       "when": 1790216095757,
       "tag": "0001_safe_valeria_richards",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790217623776,
+      "tag": "0002_rapid_stardust",
+      "breakpoints": true
     }
   ]
 }

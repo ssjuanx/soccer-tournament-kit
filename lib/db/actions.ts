@@ -26,6 +26,7 @@ import {
 } from "./matches.ts";
 import {
   getTournamentSetup,
+  saveManualTiebreakResolution,
   saveParticipants,
   saveTournamentRules,
   saveTournamentSetup,
@@ -35,7 +36,7 @@ import {
   normalizeTiebreakerOrder,
   parseScoringRules,
 } from "./setup.ts";
-import type { TiebreakerKey } from "../tournament/types.ts";
+import type { GroupId, ParticipantId, TiebreakerKey } from "../tournament/types.ts";
 
 export type ActionResult = { ok: true } | { ok: false; error: string };
 
@@ -222,6 +223,36 @@ export async function saveTournamentRulesAction(
     return {
       ok: false,
       error: error instanceof Error ? error.message : "Failed to save tournament rules.",
+    };
+  }
+}
+
+/**
+ * Persists (or clears, when `participantOrder` is empty) the administrator's
+ * manual tiebreak ordering for one group. Used by the manual-resolution panel
+ * in the admin UI. The order is normalized (de-duplicated, non-empty ids) by
+ * the repository before upserting.
+ */
+export async function saveManualTiebreakResolutionAction(
+  groupId: GroupId,
+  participantOrder: ParticipantId[],
+): Promise<ActionResult> {
+  if (typeof groupId !== "string" || groupId === "") {
+    return { ok: false, error: "A group is required." };
+  }
+  if (!Array.isArray(participantOrder)) {
+    return { ok: false, error: "Participant order must be a list." };
+  }
+  try {
+    await saveManualTiebreakResolution(groupId, participantOrder);
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : "Failed to save the manual tiebreak.",
     };
   }
 }

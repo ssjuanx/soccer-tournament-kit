@@ -3,6 +3,7 @@ import { getTournamentSetup } from "@/lib/db/tournaments";
 import { getGroupMatches } from "@/lib/db/matches";
 import { calculateStandings } from "@/lib/tournament/standings";
 import type {
+  ManualTiebreakResolution,
   ScoringConfig,
   TiebreakerOrder,
 } from "@/lib/tournament/types";
@@ -50,6 +51,7 @@ export default async function StandingsPage() {
             lossPoints: setup.tournament.lossPoints,
           }}
           tiebreakerOrder={setup.tournament.tiebreakerOrder}
+          manualResolutions={setup.manualResolutions}
         />
       )}
     </div>
@@ -62,6 +64,7 @@ interface StandingsTablesProps {
   matches: Parameters<typeof calculateStandings>[0];
   scoring: ScoringConfig;
   tiebreakerOrder: TiebreakerOrder;
+  manualResolutions: ManualTiebreakResolution[];
 }
 
 function StandingsTables({
@@ -70,6 +73,7 @@ function StandingsTables({
   matches,
   scoring,
   tiebreakerOrder,
+  manualResolutions,
 }: StandingsTablesProps) {
   // Group participants by their groupId, preserving the snapshot's draw order.
   const participantsByGroup = new Map<string, SavedParticipant[]>();
@@ -110,8 +114,9 @@ function StandingsTables({
             assignedTeamId: null,
             groupId: p.groupId,
           })),
-          { scoring, tiebreakerOrder },
+          { scoring, tiebreakerOrder, manualResolutions },
         );
+        const hasUnresolved = standings.some((r) => r.unresolved);
         return (
           <section
             key={group.id}
@@ -123,6 +128,11 @@ function StandingsTables({
               className="text-lg font-semibold text-slate-900"
             >
               Group {group.label}
+              {hasUnresolved ? (
+                <span className="ml-2 inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">
+                  Tiebreak pending
+                </span>
+              ) : null}
             </h2>
             <div className="mt-3 overflow-x-auto">
               <table className="w-full border-collapse text-sm">
@@ -156,6 +166,12 @@ function StandingsTables({
                       >
                         <td className="py-2 pr-3 font-medium text-slate-900">
                           {row.position}
+                          {row.unresolved ? (
+                            <span
+                              title="Tiebreak pending — this position is shared pending manual resolution"
+                              className="ml-1 inline-block h-1.5 w-1.5 rounded-full bg-amber-400 align-middle"
+                            />
+                          ) : null}
                         </td>
                         <td className="py-2 pr-3 text-slate-900">
                           {participant?.name ?? "—"}

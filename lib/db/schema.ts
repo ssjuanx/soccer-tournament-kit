@@ -17,7 +17,7 @@
  * lists below mirror the unions in `types.ts` and must stay in sync.
  */
 
-import { integer, text, pgTable, index } from "drizzle-orm/pg-core";
+import { integer, text, pgTable, index, uniqueIndex } from "drizzle-orm/pg-core";
 
 // ---------------------------------------------------------------------------
 // Enums (text columns with TS-level union types)
@@ -140,5 +140,30 @@ export const matches = pgTable(
   (table) => [
     index("matches_tournament_id_idx").on(table.tournamentId),
     index("matches_group_id_idx").on(table.groupId),
+  ],
+);
+
+// Administrator's manual tiebreak ordering, one row per (tournament, group).
+// `participant_order` is a JSON-encoded `ParticipantId[]` (best first), used by
+// the `manual` tiebreaker when a tied cohort is reached. Stored as plain `text`
+// to stay consistent with the text-based pattern used for `tiebreaker_order`.
+// The deterministic id keeps saves idempotent (one row per group).
+export const manualTiebreakResolutions = pgTable(
+  "manual_tiebreak_resolutions",
+  {
+    id: text("id").primaryKey(),
+    tournamentId: text("tournament_id")
+      .notNull()
+      .references(() => tournaments.id, { onDelete: "cascade" }),
+    groupId: text("group_id")
+      .notNull()
+      .references(() => groups.id, { onDelete: "cascade" }),
+    participantOrder: text("participant_order").notNull(),
+  },
+  (table) => [
+    uniqueIndex("manual_tiebreak_resolutions_group_id_unique").on(
+      table.tournamentId,
+      table.groupId,
+    ),
   ],
 );

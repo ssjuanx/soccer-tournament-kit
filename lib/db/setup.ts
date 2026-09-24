@@ -23,7 +23,14 @@ import {
   DEFAULT_SCORING_CONFIG,
   DEFAULT_TIEBREAKER_ORDER,
 } from "../tournament/standings.ts";
-import type { ScoringConfig, TiebreakerKey, TiebreakerOrder } from "../tournament/types.ts";
+import type {
+  GroupId,
+  ManualTiebreakResolution,
+  ParticipantId,
+  ScoringConfig,
+  TiebreakerKey,
+  TiebreakerOrder,
+} from "../tournament/types.ts";
 
 // ---------------------------------------------------------------------------
 // Persisted snapshot types (mirror the rows in `schema.ts`, domain-shaped)
@@ -73,6 +80,19 @@ export interface TournamentSetupSnapshot {
   tournament: SavedTournament | null;
   groups: SavedGroup[];
   participants: SavedParticipant[];
+  /**
+   * Stored manual tiebreak resolutions (one per group that the admin has
+   * ordered). Empty when no `manual` tiebreaker resolutions have been saved.
+   * Used by the standings engine and the admin manual-resolution panel.
+   */
+  manualResolutions: ManualTiebreakResolution[];
+}
+
+/** A persisted manual tiebreak resolution, without the `tournamentId`. */
+export interface SavedManualTiebreakResolution {
+  id: string;
+  groupId: string;
+  participantOrder: ParticipantId[];
 }
 
 /** A single draw-order slot as edited in the admin UI. */
@@ -105,6 +125,14 @@ export function participantIdFor(tournamentId: string, drawOrder: number): strin
 /** Deterministic team row id from a team name (unique within a tournament). */
 export function teamIdFor(tournamentId: string, name: string): string {
   return `${tournamentId}:team:${name}`;
+}
+
+/** Deterministic manual-tiebreak-resolution row id for one group. */
+export function manualResolutionIdFor(
+  tournamentId: string,
+  groupId: string,
+): string {
+  return `${tournamentId}:resolution:${groupId}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -313,6 +341,58 @@ export function normalizeTiebreakerOrder(order: TiebreakerKey[]): TiebreakerOrde
     }
   }
   return out.length === 0 ? [...DEFAULT_TIEBREAKER_ORDER] : out;
+}
+
+// ---------------------------------------------------------------------------
+// Manual tiebreak resolution: participant-order serialization & parsing
+// ---------------------------------------------------------------------------
+
+/**
+ * Serializes a manual-tiebreak participant order into the JSON text stored in
+ * `manual_tiebreak_resolutions.participant_order`. Returns the JSON string
+ * (never null — a resolution row only exists when the admin has set an order).
+ */
+export function serializeParticipantOrder(order: ParticipantId[]): string {
+  return JSON.stringify(order);
+}
+
+/**
+ * Parses a stored `participant_order` text value into a `ParticipantId[]`.
+ *
+ * Malformed JSON or non-array values yield an empty array (treated as "no
+ * resolution"), so a corrupt row never breaks standings rendering. Non-string
+ * entries are dropped. The result is *not* de-duplicated or validated against
+ * known participants here — the ranking resolver validates coverage itself.
+ */
+export function parseParticipantOrder(
+  raw: string | null | undefined,
+): ParticipantId[] {
+  if (raw == null || raw === "") return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+  return parsed.filter((item): item is ParticipantId => typeof item === "string");
+}
+
+/**
+ * Normalizes a candidate participant order from the admin UI: keeps only
+ * non-empty string ids, de-duplicates (first occurrence wins), and preserves
+ * order. Returns the cleaned list (possibly empty).
+ */
+export function normalizeParticipantOrder(order: ParticipantId[]): ParticipantId[] {
+  const seen = new Set<ParticipantId>();
+  const out: ParticipantId[] = [];
+  for (const id of order) {
+    if (typeof id === "string" && id !== "" && !seen.has(id)) {
+      seen.add(id);
+      out.push(id);
+    }
+  }
+  return out;
 }
 
 /**
