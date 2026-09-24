@@ -27,9 +27,15 @@ import {
 import {
   getTournamentSetup,
   saveParticipants,
+  saveTournamentRules,
   saveTournamentSetup,
 } from "./tournaments.ts";
-import type { Entry } from "./setup.ts";
+import {
+  type Entry,
+  normalizeTiebreakerOrder,
+  parseScoringRules,
+} from "./setup.ts";
+import type { TiebreakerKey } from "../tournament/types.ts";
 
 export type ActionResult = { ok: true } | { ok: false; error: string };
 
@@ -182,6 +188,40 @@ export async function saveMatchScoreAction(
     return {
       ok: false,
       error: error instanceof Error ? error.message : "Failed to save the score.",
+    };
+  }
+}
+
+/**
+ * Persists the active tournament's scoring rules and tiebreaker order.
+ *
+ * Accepts the raw string scoring inputs from the admin form and the
+ * tiebreaker order chosen in the UI. Scoring values are parsed and validated
+ * (integers, blanks fall back to defaults) before persisting; the tiebreaker
+ * order is normalized (unknown/duplicate keys dropped). Rules are editable
+ * even after fixtures are locked.
+ */
+export async function saveTournamentRulesAction(
+  winRaw: string,
+  drawRaw: string,
+  lossRaw: string,
+  tiebreakerOrder: TiebreakerKey[],
+): Promise<ActionResult> {
+  const parsed = parseScoringRules(winRaw, drawRaw, lossRaw);
+  if (!parsed.ok) {
+    return { ok: false, error: parsed.message };
+  }
+
+  try {
+    await saveTournamentRules(
+      parsed.config,
+      normalizeTiebreakerOrder(tiebreakerOrder),
+    );
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Failed to save tournament rules.",
     };
   }
 }

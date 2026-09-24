@@ -54,6 +54,17 @@ export const tournaments = pgTable("tournaments", {
   status: text("status", { enum: TOURNAMENT_STATUSES })
     .notNull()
     .default("draft"),
+  // Tournament-owned scoring rules. Defaults match standard soccer (3/1/0)
+  // so existing rows and a fresh setup behave as before. Editable after
+  // fixtures/participants are locked via `saveTournamentRules`.
+  winPoints: integer("win_points").notNull().default(3),
+  drawPoints: integer("draw_points").notNull().default(1),
+  lossPoints: integer("loss_points").notNull().default(0),
+  // JSON-encoded tiebreaker order (a subset of TiebreakerKey[], e.g.
+  // `["goal_difference","goals_for"]`). Stored as plain `text` (not `jsonb`)
+  // to stay consistent with the text-based-enum pattern and avoid Neon HTTP
+  // driver friction. Null means "use the default order".
+  tiebreakerOrder: text("tiebreaker_order"),
 });
 
 export const groups = pgTable(

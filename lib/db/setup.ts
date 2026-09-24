@@ -18,6 +18,12 @@
 
 import { getGroupIndexForDrawOrder, getGroupSizes } from "../tournament/groups.ts";
 import { getGroupLabel } from "../tournament/draw.ts";
+import {
+  ALL_TIEBREAKER_KEYS,
+  DEFAULT_SCORING_CONFIG,
+  DEFAULT_TIEBREAKER_ORDER,
+} from "../tournament/standings.ts";
+import type { ScoringConfig, TiebreakerKey, TiebreakerOrder } from "../tournament/types.ts";
 
 // ---------------------------------------------------------------------------
 // Persisted snapshot types (mirror the rows in `schema.ts`, domain-shaped)
@@ -30,6 +36,16 @@ export interface SavedTournament {
   participantCount: number;
   groupCount: number;
   status: string;
+  /** Tournament-owned scoring rules (defaults: 3 / 1 / 0). */
+  winPoints: number;
+  drawPoints: number;
+  lossPoints: number;
+  /**
+   * Configured tiebreaker order (applied after points, before draw order).
+   * Parsed from the stored JSON text; null/missing storage yields the default
+   * order. Always a valid `TiebreakerOrder` (never null) on a saved snapshot.
+   */
+  tiebreakerOrder: TiebreakerOrder;
 }
 
 /** A persisted group, without the `tournamentId` (implicit from the snapshot). */
@@ -225,3 +241,112 @@ export function uniqueTeamNames(normalized: PersistableEntry[]): string[] {
 
 // Re-exported so the repository can compute group sizes without a second import.
 export { getGroupSizes };
+
+// ---------------------------------------------------------------------------
+// Tournament rules: scoring config & tiebreaker order
+// ---------------------------------------------------------------------------
+
+// Re-export the defaults so the repository and actions can seed new tournaments
+// and validate without importing the engine directly.
+export { DEFAULT_SCORING_CONFIG, DEFAULT_TIEBREAKER_ORDER };
+
+/**
+ * Serializes a tiebreaker order into the JSON text stored in
+ * `tournaments.tiebreaker_order`. The default order is stored as `null` so a
+ * fresh tournament and an untouched one share the same on-disk representation.
+ */
+export function serializeTiebreakerOrder(order: TiebreakerOrder): string | null {
+  if (order.length === 0) return null;
+  // Compare ignoring order-independent concerns: if it equals the default
+  // (same sequence), store null to keep storage canonical.
+  if (
+    order.length === DEFAULT_TIEBREAKER_ORDER.length &&
+    order.every((k, i) => k === DEFAULT_TIEBREAKER_ORDER[i])
+  ) {
+    return null;
+  }
+  return JSON.stringify(order);
+}
+
+/**
+ * Parses a stored `tiebreaker_order` text value into a valid `TiebreakerOrder`.
+ *
+ * Malformed JSON, non-array values, or unknown keys are ignored and the default
+ * order is returned instead — persisted rules are trusted-but-verified so a
+ * corrupt row never breaks standings rendering. Duplicate keys are de-duplicated
+ * (first occurrence wins).
+ */
+export function parseTiebreakerOrder(raw: string | null | undefined): TiebreakerOrder {
+  if (raw == null || raw === "") return [...DEFAULT_TIEBREAKER_ORDER];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return [...DEFAULT_TIEBREAKER_ORDER];
+  }
+  if (!Array.isArray(parsed)) return [...DEFAULT_TIEBREAKER_ORDER];
+  const validKeys = new Set<string>(ALL_TIEBREAKER_KEYS);
+  const seen = new Set<TiebreakerKey>();
+  const out: TiebreakerKey[] = [];
+  for (const item of parsed) {
+    if (typeof item === "string" && validKeys.has(item) && !seen.has(item as TiebreakerKey)) {
+      seen.add(item as TiebreakerKey);
+      out.push(item as TiebreakerKey);
+    }
+  }
+  return out.length === 0 ? [...DEFAULT_TIEBREAKER_ORDER] : out;
+}
+
+/**
+ * Normalizes a candidate tiebreaker order from the admin UI: keeps only known
+ * keys, de-duplicates (first occurrence wins), and falls back to the default
+ * order when nothing valid remains. Order is preserved.
+ */
+export function normalizeTiebreakerOrder(order: TiebreakerKey[]): TiebreakerOrder {
+  const validKeys = new Set<string>(ALL_TIEBREAKER_KEYS);
+  const seen = new Set<TiebreakerKey>();
+  const out: TiebreakerKey[] = [];
+  for (const key of order) {
+    if (validKeys.has(key) && !seen.has(key)) {
+      seen.add(key);
+      out.push(key);
+    }
+  }
+  return out.length === 0 ? [...DEFAULT_TIEBREAKER_ORDER] : out;
+}
+
+/**
+ * Parses raw string scoring inputs from the admin form into a `ScoringConfig`.
+ *
+ * Each value must be an integer. Blank values fall back to the corresponding
+ * default (3 / 1 / 0). Returns a tagged result so the UI can surface a friendly
+ * error without throwing into the render path — mirrors `validateSetupInput`.
+ */
+export function parseScoringRules(
+  winRaw: string,
+  drawRaw: string,
+  lossRaw: string,
+): { ok: true; config: ScoringConfig } | { ok: false; message: string } {
+  const parse = (raw: string, fallback: number): number | null => {
+    const trimmed = raw.trim();
+    if (trimmed === "") return fallback;
+    const n = Number(trimmed);
+    if (!Number.isInteger(n)) return null;
+    return n;
+  };
+
+  const win = parse(winRaw, DEFAULT_SCORING_CONFIG.winPoints);
+  const draw = parse(drawRaw, DEFAULT_SCORING_CONFIG.drawPoints);
+  const loss = parse(lossRaw, DEFAULT_SCORING_CONFIG.lossPoints);
+
+  if (win == null) {
+    return { ok: false, message: "Win points must be a whole number." };
+  }
+  if (draw == null) {
+    return { ok: false, message: "Draw points must be a whole number." };
+  }
+  if (loss == null) {
+    return { ok: false, message: "Loss points must be a whole number." };
+  }
+  return { ok: true, config: { winPoints: win, drawPoints: draw, lossPoints: loss } };
+}

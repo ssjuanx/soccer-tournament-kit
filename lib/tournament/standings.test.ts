@@ -384,3 +384,153 @@ test("calculateStandings: accepts valid high score", () => {
   assert.equal(row("a").goalsFor, 9);
   assert.equal(row("b").goalsAgainst, 9);
 });
+
+// ---------------------------------------------------------------------------
+// Configurable scoring & tiebreaker order
+// ---------------------------------------------------------------------------
+
+test("calculateStandings: custom win points change the points total", () => {
+  const participants = [participant("a", 1), participant("b", 2)];
+  const matches = [groupMatch("A", "a", "b", 1, 0)];
+  const standings = calculateStandings(matches, participants, {
+    scoring: { winPoints: 2, drawPoints: 1, lossPoints: 0 },
+  });
+  const row = (id: string) => standings.find((r) => r.participantId === id)!;
+  assert.equal(row("a").points, 2);
+  assert.equal(row("b").points, 0);
+});
+
+test("calculateStandings: custom draw points change the points total", () => {
+  const participants = [participant("a", 1), participant("b", 2)];
+  const matches = [groupMatch("A", "a", "b", 1, 1)];
+  const standings = calculateStandings(matches, participants, {
+    scoring: { winPoints: 3, drawPoints: 2, lossPoints: 0 },
+  });
+  const row = (id: string) => standings.find((r) => r.participantId === id)!;
+  assert.equal(row("a").points, 2);
+  assert.equal(row("b").points, 2);
+});
+
+test("calculateStandings: custom loss points affect the points total", () => {
+  const participants = [participant("a", 1), participant("b", 2)];
+  const matches = [groupMatch("A", "a", "b", 0, 1)];
+  const standings = calculateStandings(matches, participants, {
+    scoring: { winPoints: 3, drawPoints: 1, lossPoints: -1 },
+  });
+  const row = (id: string) => standings.find((r) => r.participantId === id)!;
+  assert.equal(row("a").points, -1);
+  assert.equal(row("b").points, 3);
+});
+
+test("calculateStandings: no options matches the default 3/1/0 scoring", () => {
+  const participants = [participant("a", 1), participant("b", 2), participant("c", 3)];
+  const matches = [
+    groupMatch("A", "a", "b", 2, 0),
+    groupMatch("A", "b", "c", 1, 1),
+    groupMatch("A", "a", "c", 0, 3),
+  ];
+  const withDefaults = calculateStandings(matches, participants, {
+    scoring: { winPoints: 3, drawPoints: 1, lossPoints: 0 },
+    tiebreakerOrder: ["goal_difference", "goals_for"],
+  });
+  const withoutOptions = calculateStandings(matches, participants);
+  assert.deepEqual(
+    withDefaults.map((r) => r.participantId),
+    withoutOptions.map((r) => r.participantId),
+  );
+});
+
+test("calculateStandings: reversed tiebreaker order changes ranking", () => {
+  // a: GF3 GA1 GD+2, 3pts (drawOrder 1)
+  // b: GF5 GA4 GD+1, 3pts (drawOrder 2)
+  // c: 0pts, d: 6pts
+  const participants = [
+    participant("a", 1),
+    participant("b", 2),
+    participant("c", 3),
+    participant("d", 4),
+  ];
+  const matches = [
+    groupMatch("A", "a", "c", 3, 0),
+    groupMatch("A", "a", "d", 0, 1),
+    groupMatch("A", "b", "c", 5, 3),
+    groupMatch("A", "b", "d", 0, 1),
+  ];
+
+  // Default (goal_difference then goals_for): a (+2) outranks b (+1).
+  const standings = calculateStandings(matches, participants);
+  const row = (id: string) => standings.find((r) => r.participantId === id)!;
+  assert.equal(row("a").position, 2);
+  assert.equal(row("b").position, 3);
+
+  // Reversed (goals_for then goal_difference): b (GF5) outranks a (GF3).
+  const reversed = calculateStandings(matches, participants, {
+    tiebreakerOrder: ["goals_for", "goal_difference"],
+  });
+  const rrow = (id: string) => reversed.find((r) => r.participantId === id)!;
+  assert.equal(rrow("b").position, 2);
+  assert.equal(rrow("a").position, 3);
+});
+
+test("calculateStandings: single tiebreaker falls back to draw order when equal", () => {
+  // a: GF5 GA4 GD+1, 3pts (drawOrder 2)
+  // b: GF3 GA2 GD+1, 3pts (drawOrder 1)
+  // GD equal; only goal_difference configured => goals_for ignored => draw order.
+  const participants = [
+    participant("a", 2),
+    participant("b", 1),
+    participant("c", 3),
+    participant("d", 4),
+  ];
+  const matches = [
+    groupMatch("A", "a", "c", 5, 3),
+    groupMatch("A", "a", "d", 0, 1),
+    groupMatch("A", "b", "c", 3, 1),
+    groupMatch("A", "b", "d", 0, 1),
+  ];
+
+  // Default (GD then GF): GF a5 > b3 => a outranks b.
+  const defaultStandings = calculateStandings(matches, participants);
+  const drow = (id: string) =>
+    defaultStandings.find((r) => r.participantId === id)!;
+  assert.equal(drow("a").position, 2);
+  assert.equal(drow("b").position, 3);
+
+  // Only goal_difference: GD tied => draw order => b (drawOrder 1) outranks a.
+  const single = calculateStandings(matches, participants, {
+    tiebreakerOrder: ["goal_difference"],
+  });
+  const srow = (id: string) => single.find((r) => r.participantId === id)!;
+  assert.equal(srow("b").position, 2);
+  assert.equal(srow("a").position, 3);
+});
+
+test("calculateStandings: empty tiebreaker order falls straight back to draw order", () => {
+  // a: GF3 GA1 GD+2, 3pts (drawOrder 2)
+  // b: GF2 GA2 GD0, 3pts (drawOrder 1)
+  // With no tiebreakers, draw order decides => b before a despite a's better GD.
+  const participants = [
+    participant("a", 2),
+    participant("b", 1),
+    participant("c", 3),
+    participant("d", 4),
+  ];
+  const matches = [
+    groupMatch("A", "a", "c", 3, 0),
+    groupMatch("A", "a", "d", 0, 1),
+    groupMatch("A", "b", "c", 2, 0),
+    groupMatch("A", "b", "d", 0, 2),
+  ];
+
+  const standings = calculateStandings(matches, participants, {
+    tiebreakerOrder: [],
+  });
+  const row = (id: string) => standings.find((r) => r.participantId === id)!;
+  // d first (6pts), then b (drawOrder 1) before a (drawOrder 2), then c.
+  assert.deepEqual(
+    standings.map((r) => r.participantId),
+    ["d", "b", "a", "c"],
+  );
+  assert.equal(row("b").position, 2);
+  assert.equal(row("a").position, 3);
+});

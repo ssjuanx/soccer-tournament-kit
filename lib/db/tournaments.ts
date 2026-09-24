@@ -29,7 +29,10 @@ import {
   getGroupSizes,
   groupIdForDrawOrder,
   normalizeEntriesForSave,
+  normalizeTiebreakerOrder,
   participantIdFor,
+  parseTiebreakerOrder,
+  serializeTiebreakerOrder,
   teamIdFor,
   uniqueTeamNames,
   type Entry,
@@ -38,6 +41,7 @@ import {
   type SavedTournament,
   type TournamentSetupSnapshot,
 } from "./setup.ts";
+import type { ScoringConfig, TiebreakerOrder } from "../tournament/types.ts";
 
 /** Deterministic id of the single active tournament. */
 export const ACTIVE_TOURNAMENT_ID = "active";
@@ -92,6 +96,10 @@ export async function getTournamentSetup(): Promise<TournamentSetupSnapshot> {
     participantCount: tournament.participantCount,
     groupCount: tournament.groupCount,
     status: tournament.status,
+    winPoints: tournament.winPoints,
+    drawPoints: tournament.drawPoints,
+    lossPoints: tournament.lossPoints,
+    tiebreakerOrder: parseTiebreakerOrder(tournament.tiebreakerOrder),
   };
 
   const savedParticipants: SavedParticipant[] = participantRows.map((p) => ({
@@ -284,4 +292,45 @@ export async function saveParticipants(
   } else {
     await db.delete(teams).where(eq(teams.tournamentId, ACTIVE_TOURNAMENT_ID));
   }
+}
+
+/**
+ * Persists the active tournament's scoring rules and tiebreaker order.
+ *
+ * Kept separate from `saveTournamentSetup` because rules are editable after
+ * fixtures and participants are locked (changing scoring values or the
+ * tiebreaker order never invalidates the fixture pairings). Only the rules
+ * columns are touched; participant/group counts, status, and groups are left
+ * as-is. The tiebreaker order is normalized and serialized to JSON text (the
+ * default order is stored as `null` to keep storage canonical).
+ *
+ * Throws when no active tournament exists (the setup must be generated first).
+ */
+export async function saveTournamentRules(
+  scoring: ScoringConfig,
+  tiebreakerOrder: TiebreakerOrder,
+): Promise<void> {
+  const [existing] = await db
+    .select({ id: tournaments.id })
+    .from(tournaments)
+    .where(eq(tournaments.id, ACTIVE_TOURNAMENT_ID))
+    .limit(1);
+
+  if (!existing) {
+    throw new Error(
+      "No active tournament found. Generate the setup before saving rules.",
+    );
+  }
+
+  const normalizedOrder = normalizeTiebreakerOrder(tiebreakerOrder);
+
+  await db
+    .update(tournaments)
+    .set({
+      winPoints: scoring.winPoints,
+      drawPoints: scoring.drawPoints,
+      lossPoints: scoring.lossPoints,
+      tiebreakerOrder: serializeTiebreakerOrder(normalizedOrder),
+    })
+    .where(eq(tournaments.id, ACTIVE_TOURNAMENT_ID));
 }

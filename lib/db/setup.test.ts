@@ -9,7 +9,11 @@ import {
   groupIdForDrawOrder,
   mapSetupToEntries,
   normalizeEntriesForSave,
+  normalizeTiebreakerOrder,
   participantIdFor,
+  parseScoringRules,
+  parseTiebreakerOrder,
+  serializeTiebreakerOrder,
   teamIdFor,
   uniqueTeamNames,
   type TournamentSetupSnapshot,
@@ -122,6 +126,10 @@ test("mapSetupToEntries: maps participants to entries keyed by draw order", () =
       participantCount: 2,
       groupCount: 2,
       status: "draft",
+      winPoints: 3,
+      drawPoints: 1,
+      lossPoints: 0,
+      tiebreakerOrder: ["goal_difference", "goals_for"],
     },
     groups: [
       { id: "active:group:A", label: "A" },
@@ -203,5 +211,175 @@ test("uniqueTeamNames: empty when no teams assigned", () => {
   assert.deepEqual(
     uniqueTeamNames([{ drawOrder: 1, name: "Alice", team: "" }]),
     [],
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Tournament rules: tiebreaker order serialization & parsing
+// ---------------------------------------------------------------------------
+
+test("serializeTiebreakerOrder: default order -> null (canonical)", () => {
+  assert.equal(
+    serializeTiebreakerOrder(["goal_difference", "goals_for"]),
+    null,
+  );
+});
+
+test("serializeTiebreakerOrder: empty -> null", () => {
+  assert.equal(serializeTiebreakerOrder([]), null);
+});
+
+test("serializeTiebreakerOrder: custom order -> JSON text", () => {
+  assert.equal(
+    serializeTiebreakerOrder(["goals_for", "goal_difference"]),
+    '["goals_for","goal_difference"]',
+  );
+  assert.equal(
+    serializeTiebreakerOrder(["goal_difference"]),
+    '["goal_difference"]',
+  );
+});
+
+test("parseTiebreakerOrder: null/empty -> default order", () => {
+  assert.deepEqual(parseTiebreakerOrder(null), [
+    "goal_difference",
+    "goals_for",
+  ]);
+  assert.deepEqual(parseTiebreakerOrder(""), [
+    "goal_difference",
+    "goals_for",
+  ]);
+  assert.deepEqual(parseTiebreakerOrder(undefined), [
+    "goal_difference",
+    "goals_for",
+  ]);
+});
+
+test("parseTiebreakerOrder: valid JSON -> parsed order", () => {
+  assert.deepEqual(
+    parseTiebreakerOrder('["goals_for","goal_difference"]'),
+    ["goals_for", "goal_difference"],
+  );
+  assert.deepEqual(
+    parseTiebreakerOrder('["goal_difference"]'),
+    ["goal_difference"],
+  );
+});
+
+test("parseTiebreakerOrder: malformed JSON -> default", () => {
+  assert.deepEqual(parseTiebreakerOrder("not json"), [
+    "goal_difference",
+    "goals_for",
+  ]);
+  assert.deepEqual(parseTiebreakerOrder("{"), [
+    "goal_difference",
+    "goals_for",
+  ]);
+});
+
+test("parseTiebreakerOrder: non-array -> default", () => {
+  assert.deepEqual(parseTiebreakerOrder('"goal_difference"'), [
+    "goal_difference",
+    "goals_for",
+  ]);
+  assert.deepEqual(parseTiebreakerOrder("42"), [
+    "goal_difference",
+    "goals_for",
+  ]);
+});
+
+test("parseTiebreakerOrder: unknown keys filtered, duplicates removed", () => {
+  assert.deepEqual(
+    parseTiebreakerOrder(
+      '["goals_for","head_to_head","goals_for","goal_difference"]',
+    ),
+    ["goals_for", "goal_difference"],
+  );
+});
+
+test("parseTiebreakerOrder: all-unknown -> default", () => {
+  assert.deepEqual(
+    parseTiebreakerOrder('["head_to_head","fair_play"]'),
+    ["goal_difference", "goals_for"],
+  );
+});
+
+// ---------------------------------------------------------------------------
+// normalizeTiebreakerOrder
+// ---------------------------------------------------------------------------
+
+test("normalizeTiebreakerOrder: keeps known, preserves order, dedupes", () => {
+  assert.deepEqual(
+    normalizeTiebreakerOrder(["goals_for", "goal_difference"]),
+    ["goals_for", "goal_difference"],
+  );
+  assert.deepEqual(
+    normalizeTiebreakerOrder(["goal_difference", "goal_difference"]),
+    ["goal_difference"],
+  );
+});
+
+test("normalizeTiebreakerOrder: filters unknown keys", () => {
+  assert.deepEqual(
+    normalizeTiebreakerOrder([
+      "goals_for",
+      "head_to_head" as never,
+      "goal_difference",
+    ]),
+    ["goals_for", "goal_difference"],
+  );
+});
+
+test("normalizeTiebreakerOrder: empty/all-unknown -> default", () => {
+  assert.deepEqual(normalizeTiebreakerOrder([]), [
+    "goal_difference",
+    "goals_for",
+  ]);
+});
+
+// ---------------------------------------------------------------------------
+// parseScoringRules
+// ---------------------------------------------------------------------------
+
+test("parseScoringRules: valid integers -> config", () => {
+  assert.deepEqual(parseScoringRules("3", "1", "0"), {
+    ok: true,
+    config: { winPoints: 3, drawPoints: 1, lossPoints: 0 },
+  });
+  assert.deepEqual(parseScoringRules("2", "1", "0"), {
+    ok: true,
+    config: { winPoints: 2, drawPoints: 1, lossPoints: 0 },
+  });
+});
+
+test("parseScoringRules: blank values fall back to defaults", () => {
+  assert.deepEqual(parseScoringRules("", "", ""), {
+    ok: true,
+    config: { winPoints: 3, drawPoints: 1, lossPoints: 0 },
+  });
+});
+
+test("parseScoringRules: trims whitespace", () => {
+  assert.deepEqual(parseScoringRules("  3 ", " 1 ", " 0 "), {
+    ok: true,
+    config: { winPoints: 3, drawPoints: 1, lossPoints: 0 },
+  });
+});
+
+test("parseScoringRules: rejects non-integers", () => {
+  assert.match(
+    (parseScoringRules("1.5", "1", "0") as { ok: false; message: string })
+      .message,
+    /Win points/,
+  );
+  assert.match(
+    (parseScoringRules("3", "two", "0") as { ok: false; message: string })
+      .message,
+    /Draw points/,
+  );
+  assert.match(
+    (parseScoringRules("3", "1", "1.5") as { ok: false; message: string })
+      .message,
+    /Loss points/,
   );
 });

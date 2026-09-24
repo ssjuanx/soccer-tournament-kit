@@ -2,7 +2,10 @@ import { compareGroupLabels, type SavedParticipant } from "@/lib/db/setup";
 import { getTournamentSetup } from "@/lib/db/tournaments";
 import { getGroupMatches } from "@/lib/db/matches";
 import { calculateStandings } from "@/lib/tournament/standings";
-import type { Participant } from "@/lib/tournament/types";
+import type {
+  ScoringConfig,
+  TiebreakerOrder,
+} from "@/lib/tournament/types";
 
 export const metadata = { title: "Standings" };
 
@@ -41,6 +44,12 @@ export default async function StandingsPage() {
           participants={setup.participants}
           groups={setup.groups}
           matches={matches}
+          scoring={{
+            winPoints: setup.tournament.winPoints,
+            drawPoints: setup.tournament.drawPoints,
+            lossPoints: setup.tournament.lossPoints,
+          }}
+          tiebreakerOrder={setup.tournament.tiebreakerOrder}
         />
       )}
     </div>
@@ -51,12 +60,16 @@ interface StandingsTablesProps {
   participants: SavedParticipant[];
   groups: { id: string; label: string }[];
   matches: Parameters<typeof calculateStandings>[0];
+  scoring: ScoringConfig;
+  tiebreakerOrder: TiebreakerOrder;
 }
 
 function StandingsTables({
   participants,
   groups,
   matches,
+  scoring,
+  tiebreakerOrder,
 }: StandingsTablesProps) {
   // Group participants by their groupId, preserving the snapshot's draw order.
   const participantsByGroup = new Map<string, SavedParticipant[]>();
@@ -96,7 +109,8 @@ function StandingsTables({
             drawOrder: p.drawOrder,
             assignedTeamId: null,
             groupId: p.groupId,
-          })) satisfies Participant[],
+          })),
+          { scoring, tiebreakerOrder },
         );
         return (
           <section

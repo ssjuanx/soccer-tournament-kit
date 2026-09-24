@@ -10,8 +10,11 @@ import type {
   MatchScore,
   Participant,
   ParticipantId,
+  ScoringConfig,
   Standing,
   StandingRow,
+  TiebreakerKey,
+  TiebreakerOrder,
 } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -19,18 +22,43 @@ import type {
 // ---------------------------------------------------------------------------
 
 /**
- * Soccer group-stage points awarded for a match result.
- * Win = 3, Draw = 1, Loss = 0.
+ * Default soccer group-stage points: Win = 3, Draw = 1, Loss = 0.
  *
- * This is the single source of truth for scoring and the only runtime constant
- * in the tournament domain. It lives here because standings are the only place
- * these rules are applied.
+ * This is the single source of truth for the default scoring and the only
+ * runtime constant in the tournament domain. It lives here because standings
+ * are the only place these rules are applied. The actual values are now
+ * tournament-owned configuration (see `ScoringConfig`); `calculateStandings`
+ * accepts an override and falls back to these defaults.
  */
 export const POINTS = {
   win: 3,
   draw: 1,
   loss: 0,
 } as const;
+
+/** The default scoring config, derived from `POINTS`. */
+export const DEFAULT_SCORING_CONFIG: ScoringConfig = {
+  winPoints: POINTS.win,
+  drawPoints: POINTS.draw,
+  lossPoints: POINTS.loss,
+};
+
+/**
+ * The default tiebreaker order applied after points:
+ *   1. Goal difference (descending)
+ *   2. Goals for (descending)
+ * (Original draw order is always the final fallback and is not listed here.)
+ */
+export const DEFAULT_TIEBREAKER_ORDER: TiebreakerOrder = [
+  "goal_difference",
+  "goals_for",
+];
+
+/** All configurable tiebreaker keys (used for validation/normalization). */
+export const ALL_TIEBREAKER_KEYS: readonly TiebreakerKey[] = [
+  "goal_difference",
+  "goals_for",
+];
 
 // ---------------------------------------------------------------------------
 // Score validation
@@ -57,20 +85,22 @@ export function validateScore(score: MatchScore): void {
 }
 
 // ---------------------------------------------------------------------------
-// Tiebreaker order (temporary, explicitly documented)
+// Tiebreaker order (configurable via `TiebreakerOrder`)
 // ---------------------------------------------------------------------------
 
 /**
- * Current tiebreaker order for ranking within a group:
+ * Group-stage ranking order:
  *
- *   1. Points (descending)
- *   2. Goal difference (descending)
- *   3. Goals for (descending)
- *   4. Original draw order (ascending) — deterministic fallback
+ *   1. Points (descending) — always primary, never configurable.
+ *   2. The configured `TiebreakerOrder` (descending for each key). Only the
+ *      relative order of `goal_difference` and `goals_for` is configurable;
+ *      defaults to goal difference, then goals for.
+ *   3. Original draw order (ascending) — always the final deterministic
+ *      fallback (lower drawOrder = drawn earlier = higher rank).
  *
  * Head-to-head is intentionally NOT implemented yet (not required by the
- * current product context). If participants are still tied after points, goal
- * difference, and goals for, the participant drawn earlier ranks higher.
+ * current product context). If participants are still tied after points and
+ * all configured tiebreakers, the participant drawn earlier ranks higher.
  */
 
 interface Accumulator {
@@ -96,11 +126,26 @@ function createAccumulator(): Accumulator {
  *
  * Incomplete matches (no score) and non-group matches are ignored. Only
  * completed group-stage matches involving two known participants count.
+ *
+ * `options.scoring` overrides the points awarded per result (defaults to
+ * standard soccer 3/1/0). `options.tiebreakerOrder` overrides the order of
+ * tiebreakers applied after points (defaults to goal difference, then goals
+ * for). Points are always the primary sort and draw order is always the final
+ * fallback, regardless of the config. Both options default so existing call
+ * sites and tests remain backward-compatible.
  */
 export function calculateStandings(
   matches: Match[],
   participants: Participant[],
+  options?: {
+    scoring?: ScoringConfig;
+    tiebreakerOrder?: TiebreakerOrder;
+  },
 ): Standing {
+  const scoring = options?.scoring ?? DEFAULT_SCORING_CONFIG;
+  const tiebreakerOrder =
+    options?.tiebreakerOrder ?? DEFAULT_TIEBREAKER_ORDER;
+
   const stats = new Map<ParticipantId, Accumulator>();
   const drawOrderByParticipant = new Map<ParticipantId, number>();
 
@@ -157,16 +202,26 @@ export function calculateStandings(
       goalsFor: acc.goalsFor,
       goalsAgainst: acc.goalsAgainst,
       goalDifference: acc.goalsFor - acc.goalsAgainst,
-      points: acc.wins * POINTS.win + acc.draws * POINTS.draw,
+      points:
+        acc.wins * scoring.winPoints +
+        acc.draws * scoring.drawPoints +
+        acc.losses * scoring.lossPoints,
     };
   });
 
   rows.sort((a, b) => {
+    // Points are always the primary sort (descending).
     if (a.points !== b.points) return b.points - a.points;
-    if (a.goalDifference !== b.goalDifference) {
-      return b.goalDifference - a.goalDifference;
+    // Apply each configured tiebreaker in order (all descending).
+    for (const key of tiebreakerOrder) {
+      if (key === "goal_difference") {
+        if (a.goalDifference !== b.goalDifference) {
+          return b.goalDifference - a.goalDifference;
+        }
+      } else if (key === "goals_for") {
+        if (a.goalsFor !== b.goalsFor) return b.goalsFor - a.goalsFor;
+      }
     }
-    if (a.goalsFor !== b.goalsFor) return b.goalsFor - a.goalsFor;
     // Deterministic fallback: earlier draw order ranks first.
     const aDraw = drawOrderByParticipant.get(a.participantId);
     const bDraw = drawOrderByParticipant.get(b.participantId);

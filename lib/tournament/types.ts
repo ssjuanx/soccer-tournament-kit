@@ -31,8 +31,36 @@ export interface MatchScore {
   away: number;
 }
 
-// Soccer group-stage points (Win = 3, Draw = 1, Loss = 0) live in `standings.ts`,
-// the only module that applies them. Keeping this file limited to types only.
+// Soccer group-stage default points (Win = 3, Draw = 1, Loss = 0) live in
+// `standings.ts`, the only module that applies them. The actual values are now
+// tournament-owned configuration (see `ScoringConfig` below); `standings.ts`
+// holds the defaults. Keeping this file limited to types only.
+
+/**
+ * Points awarded for a match result. Tournament-owned so an organizer can
+ * tune scoring (e.g. win = 2 for a league that de-emphasizes winning). Values
+ * are integers; defaults are 3 / 1 / 0.
+ */
+export interface ScoringConfig {
+  winPoints: number;
+  drawPoints: number;
+  lossPoints: number;
+}
+
+/**
+ * A configurable group-stage tiebreaker key. Only the relative order of
+ * `goal_difference` and `goals_for` is configurable; points are always the
+ * primary sort and original draw order is always the final deterministic
+ * fallback. Head-to-head is intentionally not implemented yet.
+ */
+export type TiebreakerKey = "goal_difference" | "goals_for";
+
+/**
+ * The ordered list of tiebreakers applied (after points, before draw order).
+ * A subset/permutation of `TiebreakerKey[]`; the engine applies them in the
+ * given order and falls back to draw order if still tied.
+ */
+export type TiebreakerOrder = TiebreakerKey[];
 
 // ---------------------------------------------------------------------------
 // Tournament lifecycle

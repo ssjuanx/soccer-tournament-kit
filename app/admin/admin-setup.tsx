@@ -8,11 +8,13 @@ import {
   validateSetupInput,
   type SetupPlan,
 } from "@/lib/tournament/draw";
-import type { Match } from "@/lib/tournament/types";
+import type { Match, TiebreakerKey } from "@/lib/tournament/types";
 import {
   compareGroupLabels,
   entriesHaveData,
   mapSetupToEntries,
+  DEFAULT_SCORING_CONFIG,
+  DEFAULT_TIEBREAKER_ORDER,
   type Entry,
   type SavedParticipant,
   type TournamentSetupSnapshot,
@@ -24,6 +26,7 @@ import {
   generateSetupAction,
   saveMatchScoreAction,
   saveParticipantsAction,
+  saveTournamentRulesAction,
 } from "@/lib/db/actions";
 
 /**
@@ -88,6 +91,33 @@ export default function AdminSetup({
   const [scoreSaving, setScoreSaving] = useState<Record<string, boolean>>({});
   const [fixtureStatus, setFixtureStatus] = useState<"idle" | "generating">(
     "idle",
+  );
+
+  // Tournament rules (scoring values + tiebreaker order). Rehydrated from the
+  // persisted tournament; editable even while fixtures are locked because
+  // changing rules never invalidates fixture pairings.
+  const [winPointsRaw, setWinPointsRaw] = useState(() =>
+    initialSetup.tournament
+      ? String(initialSetup.tournament.winPoints)
+      : String(DEFAULT_SCORING_CONFIG.winPoints),
+  );
+  const [drawPointsRaw, setDrawPointsRaw] = useState(() =>
+    initialSetup.tournament
+      ? String(initialSetup.tournament.drawPoints)
+      : String(DEFAULT_SCORING_CONFIG.drawPoints),
+  );
+  const [lossPointsRaw, setLossPointsRaw] = useState(() =>
+    initialSetup.tournament
+      ? String(initialSetup.tournament.lossPoints)
+      : String(DEFAULT_SCORING_CONFIG.lossPoints),
+  );
+  const [tiebreakerOrder, setTiebreakerOrder] = useState<TiebreakerKey[]>(() =>
+    initialSetup.tournament
+      ? initialSetup.tournament.tiebreakerOrder
+      : [...DEFAULT_TIEBREAKER_ORDER],
+  );
+  const [rulesStatus, setRulesStatus] = useState<"saved" | "saving" | "unsaved">(
+    "saved",
   );
 
   // Lookups for rendering fixture rows: participant id -> saved participant,
@@ -247,6 +277,47 @@ export default function AdminSetup({
     }
   }
 
+  async function handleSaveRules() {
+    setRulesStatus("saving");
+    const result = await saveTournamentRulesAction(
+      winPointsRaw,
+      drawPointsRaw,
+      lossPointsRaw,
+      tiebreakerOrder,
+    );
+    if (result.ok) {
+      setRulesStatus("saved");
+      setError(null);
+    } else {
+      setRulesStatus("unsaved");
+      setError(result.error);
+    }
+  }
+
+  function moveTiebreaker(index: number, direction: -1 | 1) {
+    setTiebreakerOrder((prev) => {
+      const next = [...prev];
+      const target = index + direction;
+      if (target < 0 || target >= next.length) return prev;
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
+    setRulesStatus("unsaved");
+  }
+
+  function toggleTiebreaker(key: TiebreakerKey) {
+    setTiebreakerOrder((prev) => {
+      if (prev.includes(key)) {
+        const next = prev.filter((k) => k !== key);
+        // The engine falls back to the default order when nothing valid
+        // remains, but keep at least the default here so the UI shows intent.
+        return next.length === 0 ? [...DEFAULT_TIEBREAKER_ORDER] : next;
+      }
+      return [...prev, key];
+    });
+    setRulesStatus("unsaved");
+  }
+
   function updateScoreInput(
     matchId: string,
     side: "home" | "away",
@@ -351,6 +422,31 @@ export default function AdminSetup({
             </button>
           )}
         </section>
+      )}
+
+      {plan && (
+        <RulesSection
+          winPointsRaw={winPointsRaw}
+          drawPointsRaw={drawPointsRaw}
+          lossPointsRaw={lossPointsRaw}
+          tiebreakerOrder={tiebreakerOrder}
+          rulesStatus={rulesStatus}
+          onWinChange={(v) => {
+            setWinPointsRaw(v);
+            setRulesStatus("unsaved");
+          }}
+          onDrawChange={(v) => {
+            setDrawPointsRaw(v);
+            setRulesStatus("unsaved");
+          }}
+          onLossChange={(v) => {
+            setLossPointsRaw(v);
+            setRulesStatus("unsaved");
+          }}
+          onMoveTiebreaker={moveTiebreaker}
+          onToggleTiebreaker={toggleTiebreaker}
+          onSaveRules={handleSaveRules}
+        />
       )}
 
       {locked && (
@@ -620,6 +716,175 @@ function SaveStatusBadge({
     <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-800">
       Unsaved changes
     </span>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Tournament rules: scoring values & tiebreaker order
+// ---------------------------------------------------------------------------
+
+const TIEBREAKER_LABELS: Record<TiebreakerKey, string> = {
+  goal_difference: "Goal difference",
+  goals_for: "Goals for",
+};
+
+const ALL_TIEBREAKER_OPTIONS: TiebreakerKey[] = ["goal_difference", "goals_for"];
+
+interface RulesSectionProps {
+  winPointsRaw: string;
+  drawPointsRaw: string;
+  lossPointsRaw: string;
+  tiebreakerOrder: TiebreakerKey[];
+  rulesStatus: "saved" | "saving" | "unsaved";
+  onWinChange: (value: string) => void;
+  onDrawChange: (value: string) => void;
+  onLossChange: (value: string) => void;
+  onMoveTiebreaker: (index: number, direction: -1 | 1) => void;
+  onToggleTiebreaker: (key: TiebreakerKey) => void;
+  onSaveRules: () => void;
+}
+
+/**
+ * Edits the tournament-owned scoring rules and tiebreaker order. These are
+ * editable even after fixtures are locked (changing rules never invalidates the
+ * fixture pairings). Points are always the primary sort and draw order is
+ * always the final fallback, so only the relative order of the listed
+ * tiebreakers is configurable.
+ */
+function RulesSection({
+  winPointsRaw,
+  drawPointsRaw,
+  lossPointsRaw,
+  tiebreakerOrder,
+  rulesStatus,
+  onWinChange,
+  onDrawChange,
+  onLossChange,
+  onMoveTiebreaker,
+  onToggleTiebreaker,
+  onSaveRules,
+}: RulesSectionProps) {
+  return (
+    <section aria-labelledby="rules-heading" className="space-y-4">
+      <h2 id="rules-heading" className="text-lg font-semibold text-slate-900">
+        Scoring &amp; tiebreakers
+      </h2>
+      <p className="text-sm text-slate-600">
+        Points are always the primary sort and original draw order is always the
+        final tiebreaker. Configure the points awarded per result and the order
+        of the tiebreakers applied in between.
+      </p>
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <label className="block">
+          <span className="text-sm font-medium text-slate-700">Win points</span>
+          <input
+            type="number"
+            inputMode="numeric"
+            step={1}
+            value={winPointsRaw}
+            onChange={(e) => onWinChange(e.target.value)}
+            className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
+          />
+        </label>
+        <label className="block">
+          <span className="text-sm font-medium text-slate-700">Draw points</span>
+          <input
+            type="number"
+            inputMode="numeric"
+            step={1}
+            value={drawPointsRaw}
+            onChange={(e) => onDrawChange(e.target.value)}
+            className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
+          />
+        </label>
+        <label className="block">
+          <span className="text-sm font-medium text-slate-700">Loss points</span>
+          <input
+            type="number"
+            inputMode="numeric"
+            step={1}
+            value={lossPointsRaw}
+            onChange={(e) => onLossChange(e.target.value)}
+            className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
+          />
+        </label>
+      </div>
+
+      <div className="space-y-2">
+        <span className="text-sm font-medium text-slate-700">
+          Tiebreaker order (after points, before draw order)
+        </span>
+        <ul className="space-y-1">
+          {tiebreakerOrder.map((key, index) => (
+            <li
+              key={key}
+              className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2"
+            >
+              <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-slate-100 text-xs font-semibold text-slate-600">
+                {index + 1}
+              </span>
+              <span className="flex-1 text-sm text-slate-900">
+                {TIEBREAKER_LABELS[key]}
+              </span>
+              <button
+                type="button"
+                onClick={() => onMoveTiebreaker(index, -1)}
+                disabled={index === 0}
+                aria-label={`Move ${TIEBREAKER_LABELS[key]} up`}
+                className="rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                ↑
+              </button>
+              <button
+                type="button"
+                onClick={() => onMoveTiebreaker(index, 1)}
+                disabled={index === tiebreakerOrder.length - 1}
+                aria-label={`Move ${TIEBREAKER_LABELS[key]} down`}
+                className="rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                ↓
+              </button>
+              <button
+                type="button"
+                onClick={() => onToggleTiebreaker(key)}
+                aria-label={`Remove ${TIEBREAKER_LABELS[key]}`}
+                className="rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-700 hover:bg-slate-50"
+              >
+                Remove
+              </button>
+            </li>
+          ))}
+        </ul>
+        {/* Offer any tiebreaker not currently included so it can be added back. */}
+        <div className="flex flex-wrap gap-2">
+          {ALL_TIEBREAKER_OPTIONS.filter(
+            (key) => !tiebreakerOrder.includes(key),
+          ).map((key) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => onToggleTiebreaker(key)}
+              className="rounded-md border border-dashed border-slate-300 px-3 py-1 text-xs text-slate-600 hover:bg-slate-50"
+            >
+              + Add {TIEBREAKER_LABELS[key]}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          onClick={onSaveRules}
+          disabled={rulesStatus === "saving"}
+          className="rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-500 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {rulesStatus === "saving" ? "Saving…" : "Save rules"}
+        </button>
+        <SaveStatusBadge status={rulesStatus} />
+      </div>
+    </section>
   );
 }
 
