@@ -110,6 +110,25 @@ export function buildHeadToHeadMiniStandings(
 // Cohort resolver
 // ---------------------------------------------------------------------------
 
+/**
+ * Deterministic key for a tied cohort: the cohort's participant ids, sorted and
+ * joined by ",". Two cohorts with the same members (regardless of input order)
+ * produce the same key, so a stored manual resolution targets exactly one
+ * cohort. The resolver keys manual resolutions by the composite
+ * `groupId + NUL + cohortKey`, which keeps cohorts from different groups (and
+ * different cohorts within a group) distinct.
+ */
+export function cohortKeyOf(ids: ParticipantId[]): string {
+  return [...ids].sort().join(",");
+}
+
+/** Separator guaranteed not to appear in ids/cohort keys. */
+const MANUAL_KEY_SEP = "\u0000";
+
+function manualResolutionMapKey(groupId: GroupId, cohortKey: string): string {
+  return `${groupId}${MANUAL_KEY_SEP}${cohortKey}`;
+}
+
 /** An ordered bucket of participant ids that share a rank. */
 interface Bucket {
   ids: ParticipantId[];
@@ -123,7 +142,8 @@ interface ResolveContext {
   matches: Match[];
   scoring: ScoringConfig;
   tiebreakerOrder: TiebreakerOrder;
-  manualOrderById: Map<GroupId, ParticipantId[]>;
+  /** manual orders keyed by `groupId + NUL + cohortKey` */
+  manualOrderById: Map<string, ParticipantId[]>;
   groupId: GroupId | null;
 }
 
@@ -242,8 +262,15 @@ function resolveCohort(
   if (key === "manual") {
     // Manual is terminal: an explicit admin ordering fully resolves the cohort,
     // or — when no/invalid resolution is stored — the cohort is unresolved.
+    // Resolutions are cohort-scoped: the cohort's deterministic key selects the
+    // matching stored order (if any) for this group.
+    const cohortKey = cohortKeyOf(ids);
     const order =
-      ctx.groupId != null ? ctx.manualOrderById.get(ctx.groupId) : undefined;
+      ctx.groupId != null
+        ? ctx.manualOrderById.get(
+            manualResolutionMapKey(ctx.groupId, cohortKey),
+          )
+        : undefined;
     if (order == null || !coversAll(order, ids)) {
       return [{ ids, unresolved: true }];
     }
@@ -286,9 +313,15 @@ export function rankRows(
   const rowsById = new Map<ParticipantId, StandingRow>();
   for (const row of rows) rowsById.set(row.participantId, row);
 
-  const manualOrderById = new Map<GroupId, ParticipantId[]>();
+  const manualOrderById = new Map<string, ParticipantId[]>();
   for (const resolution of ctx.manualResolutions ?? []) {
-    manualOrderById.set(resolution.groupId, resolution.participantOrder);
+    // Legacy group-scoped rows (no cohort key) are ignored — only cohort-scoped
+    // resolutions participate in ranking.
+    if (!resolution.cohortKey) continue;
+    manualOrderById.set(
+      manualResolutionMapKey(resolution.groupId, resolution.cohortKey),
+      resolution.participantOrder,
+    );
   }
 
   const resolveCtx: ResolveContext = {

@@ -96,6 +96,7 @@ export interface TournamentSetupSnapshot {
 export interface SavedManualTiebreakResolution {
   id: string;
   groupId: string;
+  cohortKey: string;
   participantOrder: ParticipantId[];
 }
 
@@ -131,12 +132,13 @@ export function teamIdFor(tournamentId: string, name: string): string {
   return `${tournamentId}:team:${name}`;
 }
 
-/** Deterministic manual-tiebreak-resolution row id for one group. */
+/** Deterministic manual-tiebreak-resolution row id for one cohort in a group. */
 export function manualResolutionIdFor(
   tournamentId: string,
   groupId: string,
+  cohortKey: string,
 ): string {
-  return `${tournamentId}:resolution:${groupId}`;
+  return `${tournamentId}:resolution:${groupId}:${cohortKey}`;
 }
 
 // ---------------------------------------------------------------------------

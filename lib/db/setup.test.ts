@@ -413,10 +413,10 @@ test("parseScoringRules: rejects non-integers", () => {
 // Manual tiebreak resolution: participant-order serialization & parsing
 // ---------------------------------------------------------------------------
 
-test("manualResolutionIdFor: deterministic, group-derived", () => {
+test("manualResolutionIdFor: deterministic, group + cohort derived", () => {
   assert.equal(
-    manualResolutionIdFor("active", "active:group:A"),
-    "active:resolution:active:group:A",
+    manualResolutionIdFor("active", "active:group:A", "p1,p2,p3"),
+    "active:resolution:active:group:A:p1,p2,p3",
   );
 });
 

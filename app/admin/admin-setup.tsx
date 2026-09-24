@@ -8,7 +8,15 @@ import {
   validateSetupInput,
   type SetupPlan,
 } from "@/lib/tournament/draw";
-import type { Match, ParticipantId, TiebreakerKey } from "@/lib/tournament/types";
+import { calculateStandings } from "@/lib/tournament/standings";
+import { cohortKeyOf } from "@/lib/tournament/tiebreakers";
+import type {
+  ManualTiebreakResolution,
+  Match,
+  Participant,
+  ParticipantId,
+  TiebreakerKey,
+} from "@/lib/tournament/types";
 import {
   compareGroupLabels,
   entriesHaveData,
@@ -175,14 +183,20 @@ export default function AdminSetup({
     return map;
   }, [initialSetup.participants]);
 
-  // Manual tiebreak orders per group, seeded from the persisted resolutions.
-  // A group without a saved resolution defaults to draw order (the admin can
-  // reorder from there). Only relevant while `manual` is in the tiebreaker order.
+  // Cohort-scoped manual tiebreak orders. The admin reorders one tied cohort at
+  // a time. `savedResolutions` mirrors what has been persisted and drives which
+  // cohorts are still shown as needing a resolution; `manualOrders` holds live
+  // (possibly unsaved) edits keyed by the cohort's deterministic key. A cohort
+  // without a saved order defaults to draw order (the admin reorders from there).
+  // Only relevant while `manual` is in the tiebreaker order.
+  const [savedResolutions, setSavedResolutions] = useState<
+    ManualTiebreakResolution[]
+  >(() => initialSetup.manualResolutions.map((r) => ({ ...r })));
   const [manualOrders, setManualOrders] = useState<Record<string, ParticipantId[]>>(
     () => {
       const seed: Record<string, ParticipantId[]> = {};
       for (const resolution of initialSetup.manualResolutions) {
-        seed[resolution.groupId] = [...resolution.participantOrder];
+        seed[resolution.cohortKey] = [...resolution.participantOrder];
       }
       return seed;
     },
@@ -389,39 +403,132 @@ export default function AdminSetup({
     setRulesStatus("unsaved");
   }
 
+  // Tied cohorts that currently reach the `manual` tiebreaker without a stored
+  // resolution, per group. Derived from the saved scores (`matches`) and the
+  // saved resolutions so the panel lists exactly the cohorts still needing
+  // input — a cohort with a covering saved order is resolved and hidden.
+  // Recomputed as scores are entered and as resolutions are saved.
+  const cohortsByGroup = useMemo(() => {
+    const result = new Map<
+      string,
+      { cohortKey: string; participantIds: ParticipantId[] }[]
+    >();
+    if (!tiebreakerOrder.includes("manual")) return result;
+    const scoring = initialSetup.tournament
+      ? {
+          winPoints: initialSetup.tournament.winPoints,
+          drawPoints: initialSetup.tournament.drawPoints,
+          lossPoints: initialSetup.tournament.lossPoints,
+        }
+      : DEFAULT_SCORING_CONFIG;
+    for (const group of initialSetup.groups) {
+      const groupParticipants = participantsByGroup.get(group.id) ?? [];
+      if (groupParticipants.length === 0) continue;
+      const groupMatches = matches.filter((m) => m.groupId === group.id);
+      const standings = calculateStandings(
+        groupMatches,
+        groupParticipants.map(
+          (p): Participant => ({
+            id: p.id,
+            name: p.name,
+            drawOrder: p.drawOrder,
+            assignedTeamId: null,
+            groupId: p.groupId,
+          }),
+        ),
+        {
+          scoring,
+          tiebreakerOrder,
+          groupId: group.id,
+          manualResolutions: savedResolutions,
+        },
+      );
+      // Group unresolved rows by shared position -> one cohort each.
+      const byPosition = new Map<number, ParticipantId[]>();
+      for (const row of standings) {
+        if (!row.unresolved) continue;
+        const list = byPosition.get(row.position);
+        if (list) list.push(row.participantId);
+        else byPosition.set(row.position, [row.participantId]);
+      }
+      const cohorts: { cohortKey: string; participantIds: ParticipantId[] }[] =
+        [];
+      for (const ids of byPosition.values()) {
+        if (ids.length <= 1) continue;
+        // Stable display order: draw order ascending.
+        const ordered = [...ids].sort(
+          (a, b) =>
+            (participantById.get(a)?.drawOrder ?? Infinity) -
+            (participantById.get(b)?.drawOrder ?? Infinity),
+        );
+        cohorts.push({ cohortKey: cohortKeyOf(ids), participantIds: ordered });
+      }
+      result.set(group.id, cohorts);
+    }
+    return result;
+  }, [
+    matches,
+    savedResolutions,
+    tiebreakerOrder,
+    initialSetup.groups,
+    initialSetup.tournament,
+    participantsByGroup,
+    participantById,
+  ]);
+
   // --- Manual tiebreak resolution handlers ---
 
-  /** Returns the editable order for a group (saved resolution or draw order). */
-  function manualOrderFor(groupId: string): ParticipantId[] {
-    const existing = manualOrders[groupId];
+  /** Returns the editable order for a cohort (live/saved order or draw order). */
+  function manualOrderFor(
+    cohortKey: string,
+    participantIds: ParticipantId[],
+  ): ParticipantId[] {
+    const existing = manualOrders[cohortKey];
     if (existing && existing.length > 0) return existing;
-    const groupParticipants = participantsByGroup.get(groupId) ?? [];
-    return groupParticipants.map((p) => p.id);
+    return [...participantIds];
   }
 
   function moveManualParticipant(
-    groupId: string,
+    cohortKey: string,
+    participantIds: ParticipantId[],
     index: number,
     direction: -1 | 1,
   ) {
-    const order = [...manualOrderFor(groupId)];
+    const order = [...manualOrderFor(cohortKey, participantIds)];
     const target = index + direction;
     if (target < 0 || target >= order.length) return;
     [order[index], order[target]] = [order[target], order[index]];
-    setManualOrders((prev) => ({ ...prev, [groupId]: order }));
-    setManualStatus((prev) => ({ ...prev, [groupId]: "unsaved" }));
+    setManualOrders((prev) => ({ ...prev, [cohortKey]: order }));
+    setManualStatus((prev) => ({ ...prev, [cohortKey]: "unsaved" }));
   }
 
-  async function handleSaveManualResolution(groupId: string) {
-    const order = manualOrderFor(groupId);
-    setManualSaving((prev) => ({ ...prev, [groupId]: true }));
-    setManualStatus((prev) => ({ ...prev, [groupId]: "saving" }));
-    const result = await saveManualTiebreakResolutionAction(groupId, order);
-    setManualSaving((prev) => ({ ...prev, [groupId]: false }));
+  async function handleSaveManualResolution(
+    groupId: string,
+    cohort: { cohortKey: string; participantIds: ParticipantId[] },
+  ) {
+    const order = manualOrderFor(cohort.cohortKey, cohort.participantIds);
+    setManualSaving((prev) => ({ ...prev, [cohort.cohortKey]: true }));
+    setManualStatus((prev) => ({ ...prev, [cohort.cohortKey]: "saving" }));
+    const result = await saveManualTiebreakResolutionAction(
+      groupId,
+      cohort.cohortKey,
+      order,
+    );
+    setManualSaving((prev) => ({ ...prev, [cohort.cohortKey]: false }));
     if (result.ok) {
-      setManualStatus((prev) => ({ ...prev, [groupId]: "saved" }));
+      setManualStatus((prev) => ({ ...prev, [cohort.cohortKey]: "saved" }));
+      // Mirror the saved resolution locally so the cohort is treated as
+      // resolved on recompute (it drops out of the "needs resolution" list).
+      setSavedResolutions((prev) => {
+        const filtered = prev.filter((r) => r.cohortKey !== cohort.cohortKey);
+        return [
+          ...filtered,
+          { groupId, cohortKey: cohort.cohortKey, participantOrder: order },
+        ];
+      });
+      setError(null);
     } else {
-      setManualStatus((prev) => ({ ...prev, [groupId]: "error" }));
+      setManualStatus((prev) => ({ ...prev, [cohort.cohortKey]: "error" }));
       setError(result.error);
     }
   }
@@ -587,7 +694,7 @@ export default function AdminSetup({
       {plan && tiebreakerOrder.includes("manual") && (
         <ManualTiebreakSection
           groups={initialSetup.groups}
-          participantsByGroup={participantsByGroup}
+          cohortsByGroup={cohortsByGroup}
           participantById={participantById}
           groupLabelById={groupLabelById}
           manualOrderFor={manualOrderFor}
@@ -1178,26 +1285,42 @@ function RulesSection({
 
 interface ManualTiebreakSectionProps {
   groups: { id: string; label: string }[];
-  participantsByGroup: Map<string, SavedParticipant[]>;
+  cohortsByGroup: Map<
+    string,
+    { cohortKey: string; participantIds: ParticipantId[] }[]
+  >;
   participantById: Map<string, SavedParticipant>;
   groupLabelById: Map<string, string>;
-  manualOrderFor: (groupId: string) => ParticipantId[];
+  manualOrderFor: (
+    cohortKey: string,
+    participantIds: ParticipantId[],
+  ) => ParticipantId[];
   savingByGroup: Record<string, boolean>;
   statusByGroup: Record<string, "saved" | "saving" | "unsaved" | "error">;
-  onMove: (groupId: string, index: number, direction: -1 | 1) => void;
-  onSave: (groupId: string) => void;
+  onMove: (
+    cohortKey: string,
+    participantIds: ParticipantId[],
+    index: number,
+    direction: -1 | 1,
+  ) => void;
+  onSave: (
+    groupId: string,
+    cohort: { cohortKey: string; participantIds: ParticipantId[] },
+  ) => void;
 }
 
 /**
  * Manual tiebreak resolution panel. Shown only when the `manual` tiebreaker is
- * enabled. For each group with participants, the administrator reorders the
- * participants (best first) and saves; that ordering is consulted by the
- * `manual` tiebreaker when a tied cohort is reached. Until a resolution is
- * saved, ties in such a group are shown as "tiebreak pending".
+ * enabled. Each card is one tied cohort within a group that reached the manual
+ * tiebreaker without a stored resolution; the administrator reorders that
+ * cohort's members best-first and saves. The ordering resolves only that
+ * cohort — other cohorts in the same group are unaffected. Until a cohort is
+ * resolved, its members share a position as "tiebreak pending". Cohorts that
+ * already have a covering saved resolution are not shown.
  */
 function ManualTiebreakSection({
   groups,
-  participantsByGroup,
+  cohortsByGroup,
   participantById,
   groupLabelById,
   manualOrderFor,
@@ -1207,8 +1330,13 @@ function ManualTiebreakSection({
   onSave,
 }: ManualTiebreakSectionProps) {
   const visibleGroups = groups
-    .filter((g) => (participantsByGroup.get(g.id)?.length ?? 0) > 0)
+    .filter((g) => (cohortsByGroup.get(g.id)?.length ?? 0) > 0)
     .sort((a, b) => compareGroupLabels(a.label, b.label));
+
+  const totalCohorts = visibleGroups.reduce(
+    (sum, g) => sum + (cohortsByGroup.get(g.id)?.length ?? 0),
+    0,
+  );
 
   return (
     <section aria-labelledby="manual-heading" className="space-y-4">
@@ -1216,32 +1344,50 @@ function ManualTiebreakSection({
         Manual tiebreak resolutions
       </h2>
       <p className="text-sm text-slate-600">
-        The <em>manual</em> tiebreaker is enabled. For each group, order the
-        participants best-first. When a group has a tied cohort that reaches the
-        manual tiebreaker, this ordering resolves it; until then, ties in such a
-        group are shown as <span className="font-medium">tiebreak pending</span>.
+        The <em>manual</em> tiebreaker is enabled. Each card below is one tied
+        cohort that reached the manual tiebreaker without a stored resolution.
+        Order that cohort&rsquo;s participants best-first and save; the ordering
+        resolves only that cohort. Until then, its members share a position as{" "}
+        <span className="font-medium">tiebreak pending</span>.
       </p>
-      <div className="space-y-4">
-        {visibleGroups.map((group) => {
-          const order = manualOrderFor(group.id);
-          const label = groupLabelById.get(group.id) ?? group.label;
-          const saving = savingByGroup[group.id] === true;
-          const status = statusByGroup[group.id];
-          return (
-            <div key={group.id} className="rounded-lg border border-slate-200 bg-white p-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-semibold text-slate-900">
-                  Group {label}
-                </h3>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => onSave(group.id)}
-                    disabled={saving}
-                    className="rounded-md bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-200 focus:outline-none focus:ring-2 focus:ring-slate-500 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {saving ? "Saving…" : "Save order"}
-                  </button>
+      {totalCohorts === 0 ? (
+        <p className="text-sm text-slate-500">
+          No unresolved tied cohorts right now — every tie that reaches the
+          manual tiebreaker has a saved resolution.
+        </p>
+      ) : (
+        <div className="space-y-4">
+          {visibleGroups.flatMap((group) => {
+            const cohorts = cohortsByGroup.get(group.id) ?? [];
+            const label = groupLabelById.get(group.id) ?? group.label;
+            return cohorts.map((cohort) => {
+              const order = manualOrderFor(
+                cohort.cohortKey,
+                cohort.participantIds,
+              );
+              const saving = savingByGroup[cohort.cohortKey] === true;
+              const status = statusByGroup[cohort.cohortKey];
+              return (
+                <div
+                  key={`${group.id}:${cohort.cohortKey}`}
+                  className="rounded-lg border border-slate-200 bg-white p-4"
+                >
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-semibold text-slate-900">
+                      Group {label}
+                      <span className="ml-2 text-xs font-normal text-slate-500">
+                        {cohort.participantIds.length} tied
+                      </span>
+                    </h3>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => onSave(group.id, cohort)}
+                        disabled={saving}
+                        className="rounded-md bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-200 focus:outline-none focus:ring-2 focus:ring-slate-500 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {saving ? "Saving…" : "Save order"}
+                      </button>
                   {status === "saving" ? (
                     <span className="text-xs text-slate-500">Saving…</span>
                   ) : status === "unsaved" ? (
@@ -1275,7 +1421,14 @@ function ManualTiebreakSection({
                       </span>
                       <button
                         type="button"
-                        onClick={() => onMove(group.id, index, -1)}
+                        onClick={() =>
+                          onMove(
+                            cohort.cohortKey,
+                            cohort.participantIds,
+                            index,
+                            -1,
+                          )
+                        }
                         disabled={index === 0}
                         aria-label={`Move ${participant?.name ?? id} up`}
                         className="rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
@@ -1284,7 +1437,14 @@ function ManualTiebreakSection({
                       </button>
                       <button
                         type="button"
-                        onClick={() => onMove(group.id, index, 1)}
+                        onClick={() =>
+                          onMove(
+                            cohort.cohortKey,
+                            cohort.participantIds,
+                            index,
+                            1,
+                          )
+                        }
                         disabled={index === order.length - 1}
                         aria-label={`Move ${participant?.name ?? id} down`}
                         className="rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
@@ -1297,8 +1457,10 @@ function ManualTiebreakSection({
               </ol>
             </div>
           );
-        })}
-      </div>
+            });
+          })}
+        </div>
+      )}
     </section>
   );
 }

@@ -127,17 +127,22 @@ export async function getTournamentSetup(): Promise<TournamentSetupSnapshot> {
     .select({
       id: manualTiebreakResolutions.id,
       groupId: manualTiebreakResolutions.groupId,
+      cohortKey: manualTiebreakResolutions.cohortKey,
       participantOrder: manualTiebreakResolutions.participantOrder,
     })
     .from(manualTiebreakResolutions)
     .where(eq(manualTiebreakResolutions.tournamentId, ACTIVE_TOURNAMENT_ID));
 
+  // Legacy group-scoped rows (NULL cohort_key, from before the cohort model)
+  // are dropped here so the resolver never sees them — only cohort-scoped
+  // resolutions with a non-empty order participate in ranking.
   const manualResolutions: ManualTiebreakResolution[] = resolutionRows
     .map((r) => ({
       groupId: r.groupId,
+      cohortKey: r.cohortKey ?? "",
       participantOrder: parseParticipantOrder(r.participantOrder),
     }))
-    .filter((r) => r.participantOrder.length > 0);
+    .filter((r) => r.cohortKey !== "" && r.participantOrder.length > 0);
 
   return {
     tournament: savedTournament,
@@ -410,14 +415,16 @@ export async function saveTournamentRules(
 
 /**
  * Persists (or clears) the administrator's manual tiebreak ordering for one
- * group. The `participantOrder` is normalized (de-duplicated, non-empty ids
- * only) and upserted by deterministic id. Passing an empty order deletes the
- * row so the group returns to the unresolved/auto-fallback behaviour.
+ * tied cohort within a group. The `participantOrder` is normalized (de-duped,
+ * non-empty ids only) and upserted by a deterministic id scoped to the cohort.
+ * Passing an empty order deletes the row so the cohort returns to the
+ * unresolved/auto-fallback behaviour.
  *
  * Throws when no active tournament exists (the setup must be generated first).
  */
 export async function saveManualTiebreakResolution(
   groupId: GroupId,
+  cohortKey: string,
   participantOrder: ParticipantId[],
 ): Promise<void> {
   const [existing] = await db
@@ -432,8 +439,16 @@ export async function saveManualTiebreakResolution(
     );
   }
 
+  if (cohortKey === "") {
+    throw new Error("A cohort is required to save a manual tiebreak.");
+  }
+
   const normalized = normalizeParticipantOrder(participantOrder);
-  const id = manualResolutionIdFor(ACTIVE_TOURNAMENT_ID, groupId);
+  const id = manualResolutionIdFor(
+    ACTIVE_TOURNAMENT_ID,
+    groupId,
+    cohortKey,
+  );
 
   if (normalized.length === 0) {
     await db
@@ -448,6 +463,7 @@ export async function saveManualTiebreakResolution(
       id,
       tournamentId: ACTIVE_TOURNAMENT_ID,
       groupId,
+      cohortKey,
       participantOrder: serializeParticipantOrder(normalized),
     })
     .onConflictDoUpdate({

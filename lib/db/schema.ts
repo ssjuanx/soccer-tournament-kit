@@ -151,11 +151,15 @@ export const matches = pgTable(
   ],
 );
 
-// Administrator's manual tiebreak ordering, one row per (tournament, group).
-// `participant_order` is a JSON-encoded `ParticipantId[]` (best first), used by
-// the `manual` tiebreaker when a tied cohort is reached. Stored as plain `text`
-// to stay consistent with the text-based pattern used for `tiebreaker_order`.
-// The deterministic id keeps saves idempotent (one row per group).
+// Administrator's manual tiebreak ordering, one row per (tournament, group,
+// cohort). `participant_order` is a JSON-encoded `ParticipantId[]` (best
+// first), used by the `manual` tiebreaker when a tied cohort is reached. Stored
+// as plain `text` to stay consistent with the text-based pattern used for
+// `tiebreaker_order`. The deterministic id keeps saves idempotent (one row per
+// cohort). `cohort_key` is `cohortKeyOf(participantIds)` (sorted ids joined by
+// ",") so a single group can hold one resolution per distinct tied cohort; it
+// is nullable so the group-scoped -> cohort-scoped migration can add the column
+// without backfilling (legacy NULL rows are ignored by the resolver).
 export const manualTiebreakResolutions = pgTable(
   "manual_tiebreak_resolutions",
   {
@@ -167,11 +171,13 @@ export const manualTiebreakResolutions = pgTable(
       .notNull()
       .references(() => groups.id, { onDelete: "cascade" }),
     participantOrder: text("participant_order").notNull(),
+    cohortKey: text("cohort_key"),
   },
   (table) => [
-    uniqueIndex("manual_tiebreak_resolutions_group_id_unique").on(
+    uniqueIndex("manual_tiebreak_resolutions_cohort_unique").on(
       table.tournamentId,
       table.groupId,
+      table.cohortKey,
     ),
   ],
 );

@@ -78,14 +78,19 @@ export type TiebreakerKey =
 export type TiebreakerOrder = TiebreakerKey[];
 
 /**
- * An administrator's manual tiebreak resolution for one group: an explicit
- * ordered list of the group's participant ids, best first. When the `manual`
- * tiebreaker is reached for a tied cohort, the cohort's members are ordered by
- * their position in this list. If any cohort member is missing from the list
- * (or no resolution is stored for the group), the cohort is marked unresolved.
+ * An administrator's manual tiebreak resolution for one tied cohort within a
+ * group: an explicit ordered list of the cohort's participant ids, best first.
+ * `cohortKey` is `cohortKeyOf(cohortParticipantIds)` (sorted ids joined by ",")
+ * and identifies exactly which tied cohort this resolution targets, so a group
+ * can hold several resolutions — one per distinct tied cohort. When the
+ * `manual` tiebreaker is reached for a cohort, the cohort's members are ordered
+ * by their position in the matching resolution. If no resolution is stored for
+ * that cohort (or any cohort member is missing from the order), the cohort is
+ * marked unresolved.
  */
 export interface ManualTiebreakResolution {
   groupId: GroupId;
+  cohortKey: string;
   participantOrder: ParticipantId[];
 }
 

@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { calculateStandings, DEFAULT_SCORING_CONFIG } from "./standings.ts";
-import { buildHeadToHeadMiniStandings } from "./tiebreakers.ts";
+import { buildHeadToHeadMiniStandings, cohortKeyOf } from "./tiebreakers.ts";
 import type {
   Match,
   ManualTiebreakResolution,
@@ -106,6 +106,8 @@ test("buildHeadToHeadMiniStandings: draw yields equal mini points", () => {
   assert.notEqual(mini, null);
   assert.equal(mini!.get("a")!.points, 1);
   assert.equal(mini!.get("b")!.points, 1);
+});
+
 // ---------------------------------------------------------------------------
 // Head-to-head tiebreaker via calculateStandings
 // ---------------------------------------------------------------------------
@@ -238,7 +240,9 @@ test("calculateStandings: manual resolution orders a tied cohort", () => {
   ];
   const standings = calculateStandings(gg, pp, {
     tiebreakerOrder: ["manual"],
-    manualResolutions: [{ groupId: "A", participantOrder: ["b", "a", "c"] }],
+    manualResolutions: [
+      { groupId: "A", cohortKey: "a,b,c", participantOrder: ["b", "a", "c"] },
+    ],
   });
   assert.deepEqual(
     standings.map((r) => r.participantId),
@@ -282,7 +286,9 @@ test("calculateStandings: manual resolution missing a cohort member -> unresolve
   ];
   const standings = calculateStandings(gg, pp, {
     tiebreakerOrder: ["manual"],
-    manualResolutions: [{ groupId: "A", participantOrder: ["b", "a"] }],
+    manualResolutions: [
+      { groupId: "A", cohortKey: "a,b,c", participantOrder: ["b", "a"] },
+    ],
   });
   for (const row of standings) {
     assert.equal(row.unresolved, true);
@@ -328,7 +334,9 @@ test("calculateStandings: manual resolution for a different group is ignored", (
   ];
   const standings = calculateStandings(gg, pp, {
     tiebreakerOrder: ["manual"],
-    manualResolutions: [{ groupId: "B", participantOrder: ["b", "a", "c"] }],
+    manualResolutions: [
+      { groupId: "B", cohortKey: "a,b,c", participantOrder: ["b", "a", "c"] },
+    ],
   });
   for (const row of standings) {
     assert.equal(row.unresolved, true);
@@ -399,7 +407,9 @@ test("calculateStandings: manual after a failing statistical tiebreaker", () => 
   ];
   const standings = calculateStandings(gg, pp, {
     tiebreakerOrder: ["goal_difference", "manual"],
-    manualResolutions: [{ groupId: "A", participantOrder: ["c", "a", "b"] }],
+    manualResolutions: [
+      { groupId: "A", cohortKey: "a,b,c", participantOrder: ["c", "a", "b"] },
+    ],
   });
   assert.deepEqual(
     standings.map((r) => r.participantId),
@@ -425,7 +435,10 @@ test("calculateStandings: manual fully resolves into positions 1..n", () => {
   ];
   const standings = calculateStandings(gg, pp, {
     tiebreakerOrder: ["manual"],
-    manualResolutions: [{ groupId: "A", participantOrder: ["b", "a", "d", "c"] }],
+    manualResolutions: [
+      { groupId: "A", cohortKey: "a,b", participantOrder: ["b", "a"] },
+      { groupId: "A", cohortKey: "c,d", participantOrder: ["d", "c"] },
+    ],
   });
   assert.deepEqual(
     standings.map((r) => r.participantId),
@@ -442,11 +455,111 @@ test("calculateStandings: groupId derived from participants for manual lookup", 
   const gg = [groupMatch("A", "a", "b", 1, 1)]; // both 1 pt, equal -> manual decides
   const standings = calculateStandings(gg, pp, {
     tiebreakerOrder: ["manual"],
-    manualResolutions: [{ groupId: "A", participantOrder: ["b", "a"] }],
+    manualResolutions: [
+      { groupId: "A", cohortKey: "a,b", participantOrder: ["b", "a"] },
+    ],
   });
   assert.deepEqual(
     standings.map((r) => r.participantId),
     ["b", "a"],
   );
 });
+
+// ---------------------------------------------------------------------------
+// Cohort-scoped manual tiebreak (Phase 3)
+// ---------------------------------------------------------------------------
+
+test("calculateStandings: manual resolution is cohort-scoped within a group", () => {
+  // Two cohorts in group A: {a,b} tied top (4 pts), {c,d} tied bottom (1 pt).
+  // Only the top cohort has a stored resolution; the bottom one stays unresolved.
+  const pp = [
+    participant("a", 1, "A"),
+    participant("b", 2, "A"),
+    participant("c", 3, "A"),
+    participant("d", 4, "A"),
+  ];
+  const gg = [
+    groupMatch("A", "a", "b", 1, 1),
+    groupMatch("A", "a", "c", 1, 0),
+    groupMatch("A", "a", "d", 1, 0),
+    groupMatch("A", "b", "c", 1, 0),
+    groupMatch("A", "b", "d", 1, 0),
+    groupMatch("A", "c", "d", 1, 1),
+  ];
+  const standings = calculateStandings(gg, pp, {
+    tiebreakerOrder: ["manual"],
+    manualResolutions: [
+      { groupId: "A", cohortKey: "a,b", participantOrder: ["b", "a"] },
+    ],
+  });
+  const row = (id: string) => standings.find((r) => r.participantId === id)!;
+  // Top cohort resolved by the stored order.
+  assert.equal(row("b").position, 1);
+  assert.equal(row("a").position, 2);
+  assert.equal(row("b").unresolved, false);
+  assert.equal(row("a").unresolved, false);
+  // Bottom cohort has no resolution -> unresolved, shared position 3.
+  assert.equal(row("c").position, 3);
+  assert.equal(row("d").position, 3);
+  assert.equal(row("c").unresolved, true);
+  assert.equal(row("d").unresolved, true);
+});
+
+test("calculateStandings: manual resolution with the wrong cohort key is ignored", () => {
+  // a,b,c all draw -> one cohort {a,b,c}. A resolution stored under a different
+  // cohort key (even in the right group) must not resolve it.
+  const pp = [
+    participant("a", 1, "A"),
+    participant("b", 2, "A"),
+    participant("c", 3, "A"),
+  ];
+  const gg = [
+    groupMatch("A", "a", "b", 1, 1),
+    groupMatch("A", "a", "c", 0, 0),
+    groupMatch("A", "b", "c", 0, 0),
+  ];
+  const standings = calculateStandings(gg, pp, {
+    tiebreakerOrder: ["manual"],
+    manualResolutions: [
+      // Wrong cohort key for the {a,b,c} cohort.
+      { groupId: "A", cohortKey: "a,b", participantOrder: ["b", "a", "c"] },
+    ],
+  });
+  for (const row of standings) {
+    assert.equal(row.unresolved, true);
+    assert.equal(row.position, 1);
+  }
+});
+
+test("calculateStandings: manual resolution with an empty cohort key is ignored (legacy)", () => {
+  // Legacy group-scoped rows carried no cohort key. The resolver must treat an
+  // empty cohort key as "no resolution" so stale rows never resolve a cohort.
+  const pp = [
+    participant("a", 1, "A"),
+    participant("b", 2, "A"),
+    participant("c", 3, "A"),
+  ];
+  const gg = [
+    groupMatch("A", "a", "b", 1, 1),
+    groupMatch("A", "a", "c", 0, 0),
+    groupMatch("A", "b", "c", 0, 0),
+  ];
+  const standings = calculateStandings(gg, pp, {
+    tiebreakerOrder: ["manual"],
+    manualResolutions: [
+      { groupId: "A", cohortKey: "", participantOrder: ["b", "a", "c"] },
+    ],
+  });
+  for (const row of standings) {
+    assert.equal(row.unresolved, true);
+    assert.equal(row.position, 1);
+  }
+});
+
+test("calculateStandings: cohortKeyOf is order-independent and sorted", () => {
+  // Exported helper: same members in any input order produce the same key.
+  assert.equal(cohortKeyOf(["c", "a", "b"]), "a,b,c");
+  assert.equal(cohortKeyOf(["a", "b", "c"]), "a,b,c");
+  assert.equal(cohortKeyOf(["b"]), "b");
+  assert.equal(cohortKeyOf([]), "");
 });

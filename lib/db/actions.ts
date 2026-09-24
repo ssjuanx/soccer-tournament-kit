@@ -260,22 +260,26 @@ export async function saveTournamentRulesAction(
 
 /**
  * Persists (or clears, when `participantOrder` is empty) the administrator's
- * manual tiebreak ordering for one group. Used by the manual-resolution panel
- * in the admin UI. The order is normalized (de-duplicated, non-empty ids) by
- * the repository before upserting.
+ * manual tiebreak ordering for one tied cohort within a group. Used by the
+ * manual-resolution panel in the admin UI. The order is normalized (de-duped,
+ * non-empty ids) by the repository before upserting.
  */
 export async function saveManualTiebreakResolutionAction(
   groupId: GroupId,
+  cohortKey: string,
   participantOrder: ParticipantId[],
 ): Promise<ActionResult> {
   if (typeof groupId !== "string" || groupId === "") {
     return { ok: false, error: "A group is required." };
   }
+  if (typeof cohortKey !== "string" || cohortKey === "") {
+    return { ok: false, error: "A cohort is required." };
+  }
   if (!Array.isArray(participantOrder)) {
     return { ok: false, error: "Participant order must be a list." };
   }
   try {
-    await saveManualTiebreakResolution(groupId, participantOrder);
+    await saveManualTiebreakResolution(groupId, cohortKey, participantOrder);
     return { ok: true };
   } catch (error) {
     return {
