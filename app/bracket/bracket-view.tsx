@@ -14,12 +14,14 @@ const ROUND_LABELS: Record<KnockoutRound, string> = {
 interface BracketViewProps {
   bracket: BracketMatch[];
   champion: string | null;
+  championLabel?: string;
   participants: SavedParticipant[];
 }
 
 export function BracketView({
   bracket,
   champion,
+  championLabel = "Champion",
   participants,
 }: BracketViewProps) {
   const participantById = new Map<string, SavedParticipant>();
@@ -39,7 +41,7 @@ export function BracketView({
       {champion != null ? (
         <div className="rounded-lg border border-amber-300 bg-amber-50 p-5">
           <h2 className="text-lg font-semibold text-amber-900">
-            🏆 Champion: {participantById.get(champion)?.name ?? "TBD"}
+            🏆 {championLabel}: {participantById.get(champion)?.name ?? "TBD"}
             {participantById.get(champion)?.teamName ? (
               <span className="text-amber-700">
                 {" "}

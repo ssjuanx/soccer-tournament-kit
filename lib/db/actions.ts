@@ -15,6 +15,7 @@ import type { Match } from "../tournament/types.ts";
 
 import {
   buildGroupStageMatches,
+  buildConsolationQualifiers,
   buildKnockoutQualifiers,
   buildKnockoutStageMatches,
   isGroupStageComplete,
@@ -30,6 +31,7 @@ import {
   getKnockoutMatches,
   saveGroupFixtures,
   saveKnockoutFixtures,
+  saveKnockoutMatchScore,
   saveMatchScore,
 } from "./matches.ts";
 import {
@@ -45,7 +47,12 @@ import {
   normalizeTiebreakerOrder,
   parseScoringRules,
 } from "./setup.ts";
-import type { GroupId, ParticipantId, TiebreakerKey } from "../tournament/types.ts";
+import type {
+  BracketKind,
+  GroupId,
+  ParticipantId,
+  TiebreakerKey,
+} from "../tournament/types.ts";
 
 export type ActionResult = { ok: true } | { ok: false; error: string };
 
@@ -56,6 +63,10 @@ export type ActionResult = { ok: true } | { ok: false; error: string };
 export type MatchActionResult =
   | { ok: true; matches: Match[] }
   | { ok: false; error: string };
+
+function isBracketKind(value: unknown): value is BracketKind {
+  return value === "championship" || value === "consolation";
+}
 
 /**
  * Generates and persists the tournament setup (participant + group counts and
@@ -179,18 +190,23 @@ export async function clearFixturesAction(): Promise<MatchActionResult> {
  * while a bracket already exists — clear it first with
  * `clearKnockoutFixturesAction`. Returns the knockout match list.
  */
-export async function generateKnockoutFixturesAction(): Promise<MatchActionResult> {
+export async function generateKnockoutFixturesAction(
+  bracketKind: BracketKind = "championship",
+): Promise<MatchActionResult> {
+  if (!isBracketKind(bracketKind)) {
+    return { ok: false, error: "Invalid bracket type." };
+  }
   try {
     const setup = await getTournamentSetup();
     if (!setup.tournament) {
       return { ok: false, error: "No active tournament found. Generate the setup first." };
     }
 
-    const existing = await getKnockoutMatches();
+    const existing = await getKnockoutMatches(bracketKind);
     if (existing.length > 0) {
       return {
         ok: false,
-        error: "The knockout bracket has already been generated. Clear it first to regenerate.",
+        error: `The ${bracketKind} bracket has already been generated. Clear it first to regenerate.`,
       };
     }
 
@@ -238,11 +254,19 @@ export async function generateKnockoutFixturesAction(): Promise<MatchActionResul
       };
     }
 
-    const qualifiers = buildKnockoutQualifiers(
-      setup.groups,
-      standingsByGroup,
-      setup.tournament.qualifiersPerGroup,
-    );
+    const qualifiers =
+      bracketKind === "championship"
+        ? buildKnockoutQualifiers(
+            setup.groups,
+            standingsByGroup,
+            setup.tournament.qualifiersPerGroup,
+          )
+        : buildConsolationQualifiers(
+            setup.groups,
+            standingsByGroup,
+            setup.tournament.qualifiersPerGroup,
+            setup.participants,
+          );
     if (qualifiers.length < 2) {
       return {
         ok: false,
@@ -250,10 +274,14 @@ export async function generateKnockoutFixturesAction(): Promise<MatchActionResul
       };
     }
 
-    const rows = buildKnockoutStageMatches(qualifiers, setup.tournament.id);
+    const rows = buildKnockoutStageMatches(
+      qualifiers,
+      setup.tournament.id,
+      bracketKind,
+    );
     await saveKnockoutFixtures(rows);
 
-    const matches = await getKnockoutMatches();
+    const matches = await getKnockoutMatches(bracketKind);
     return { ok: true, matches };
   } catch (error) {
     return {
@@ -268,9 +296,14 @@ export async function generateKnockoutFixturesAction(): Promise<MatchActionResul
  * The group stage is untouched. Use this to regenerate the bracket after a
  * rules change. Returns an empty knockout match list.
  */
-export async function clearKnockoutFixturesAction(): Promise<MatchActionResult> {
+export async function clearKnockoutFixturesAction(
+  bracketKind: BracketKind = "championship",
+): Promise<MatchActionResult> {
+  if (!isBracketKind(bracketKind)) {
+    return { ok: false, error: "Invalid bracket type." };
+  }
   try {
-    await clearKnockoutFixtures();
+    await clearKnockoutFixtures(bracketKind);
     return { ok: true, matches: [] };
   } catch (error) {
     return {
@@ -320,10 +353,14 @@ export async function saveMatchScoreAction(
  * `saveMatchScoreAction`.
  */
 export async function saveKnockoutScoreAction(
+  bracketKind: BracketKind,
   matchId: string,
   homeRaw: string,
   awayRaw: string,
 ): Promise<MatchActionResult> {
+  if (!isBracketKind(bracketKind)) {
+    return { ok: false, error: "Invalid bracket type." };
+  }
   let score;
   try {
     score = parseScore(homeRaw, awayRaw);
@@ -334,9 +371,16 @@ export async function saveKnockoutScoreAction(
     };
   }
 
+  if (score != null && score.home === score.away) {
+    return {
+      ok: false,
+      error: "Knockout matches cannot end in a draw.",
+    };
+  }
+
   try {
-    await saveMatchScore(matchId, score);
-    const matches = await getKnockoutMatches();
+    await saveKnockoutMatchScore(bracketKind, matchId, score);
+    const matches = await getKnockoutMatches(bracketKind);
     return { ok: true, matches };
   } catch (error) {
     return {

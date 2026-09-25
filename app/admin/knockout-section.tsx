@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { computeKnockoutView } from "@/lib/db/fixtures";
 import {
@@ -10,8 +10,11 @@ import {
 } from "@/lib/db/actions";
 import type { SavedParticipant, TournamentSetupSnapshot } from "@/lib/db/setup";
 import type { BracketMatch } from "@/lib/tournament/knockout";
-import type { KnockoutRound } from "@/lib/tournament/types";
-import type { Match } from "@/lib/tournament/types";
+import type {
+  BracketKind,
+  KnockoutRound,
+  Match,
+} from "@/lib/tournament/types";
 
 const ROUND_LABELS: Record<KnockoutRound, string> = {
   round_of_64: "Round of 64",
@@ -39,12 +42,16 @@ function initScoreInputs(matches: Match[]): Record<string, ScoreInput> {
 }
 
 interface KnockoutSectionProps {
+  bracketKind: BracketKind;
+  title: string;
   setup: TournamentSetupSnapshot;
   groupMatches: Match[];
   initialKnockoutMatches: Match[];
 }
 
 export function KnockoutSection({
+  bracketKind,
+  title,
   setup,
   groupMatches,
   initialKnockoutMatches,
@@ -59,9 +66,25 @@ export function KnockoutSection({
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Clearing group fixtures also deletes both derived brackets in the
+  // repository. Mirror that in local state so stale brackets cannot reappear
+  // if new group fixtures are generated without a page refresh.
+  useEffect(() => {
+    if (groupMatches.length === 0) {
+      setKnockoutMatches([]);
+      setScoreInputs({});
+    }
+  }, [groupMatches.length]);
+
   const view = useMemo(
-    () => computeKnockoutView(setup, groupMatches, knockoutMatches),
-    [setup, groupMatches, knockoutMatches],
+    () =>
+      computeKnockoutView(
+        setup,
+        groupMatches,
+        knockoutMatches,
+        bracketKind,
+      ),
+    [setup, groupMatches, knockoutMatches, bracketKind],
   );
 
   const participantById = new Map<string, SavedParticipant>();
@@ -70,7 +93,7 @@ export function KnockoutSection({
   async function handleGenerate() {
     setGenerating(true);
     setError(null);
-    const result = await generateKnockoutFixturesAction();
+    const result = await generateKnockoutFixturesAction(bracketKind);
     if (result.ok) {
       setKnockoutMatches(result.matches);
       setScoreInputs(initScoreInputs(result.matches));
@@ -83,12 +106,12 @@ export function KnockoutSection({
   async function handleClear() {
     if (
       !window.confirm(
-        "Clear the knockout bracket and all its scores? The group stage is not affected.",
+        `Clear the ${title} bracket and all its scores? The group stage is not affected.`,
       )
     ) {
       return;
     }
-    const result = await clearKnockoutFixturesAction();
+    const result = await clearKnockoutFixturesAction(bracketKind);
     if (result.ok) {
       setKnockoutMatches([]);
       setScoreInputs({});
@@ -108,7 +131,12 @@ export function KnockoutSection({
   async function handleSaveScore(matchId: string) {
     const input = scoreInputs[matchId] ?? { home: "", away: "" };
     setSaving((prev) => ({ ...prev, [matchId]: true }));
-    const result = await saveKnockoutScoreAction(matchId, input.home, input.away);
+    const result = await saveKnockoutScoreAction(
+      bracketKind,
+      matchId,
+      input.home,
+      input.away,
+    );
     if (result.ok) {
       setKnockoutMatches(result.matches);
       setScoreInputs(initScoreInputs(result.matches));
@@ -126,15 +154,14 @@ export function KnockoutSection({
   if (view.status === "ready") {
     return (
       <section className="space-y-3">
-        <h2 className="text-xl font-bold tracking-tight">Knockout</h2>
+        <h2 className="text-xl font-bold tracking-tight">{title}</h2>
         {error != null ? (
           <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
             {error}
           </p>
         ) : null}
         <p className="text-sm text-slate-600">
-          The group stage is complete. Generate the single-elimination bracket
-          from the qualified participants.
+          The group stage is complete. Generate the {title.toLowerCase()} bracket.
         </p>
         <button
           type="button"
@@ -142,7 +169,7 @@ export function KnockoutSection({
           disabled={generating}
           className="rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-500 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          {generating ? "Generating…" : "Generate knockout bracket"}
+          {generating ? "Generating…" : `Generate ${title}`}
         </button>
       </section>
     );
@@ -160,7 +187,7 @@ export function KnockoutSection({
   return (
     <section className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-xl font-bold tracking-tight">Knockout</h2>
+        <h2 className="text-xl font-bold tracking-tight">{title}</h2>
         <button
           type="button"
           onClick={handleClear}

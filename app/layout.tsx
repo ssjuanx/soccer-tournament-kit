@@ -15,7 +15,9 @@ const navLinks = [
   { href: "/standings", label: "Standings" },
   { href: "/matches", label: "Matches" },
   { href: "/bracket", label: "Bracket" },
-  { href: "/admin", label: "Admin" },
+  // Do not prefetch the protected route: a background 401 can trigger the
+  // browser's Basic Auth prompt before the visitor chooses Admin.
+  { href: "/admin", label: "Admin", prefetch: false },
 ];
 
 export default function RootLayout({
@@ -37,6 +39,7 @@ export default function RootLayout({
                   <li key={link.href}>
                     <Link
                       href={link.href}
+                      prefetch={link.prefetch}
                       className="rounded-md px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900"
                     >
                       {link.label}

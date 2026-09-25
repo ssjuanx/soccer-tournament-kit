@@ -166,6 +166,7 @@ export interface Group {
 // ---------------------------------------------------------------------------
 
 export type MatchStage = "group" | "knockout";
+export type BracketKind = "championship" | "consolation";
 
 /**
  * A round within the single-elimination knockout stage. Enumerated from the
@@ -193,6 +194,8 @@ export type KnockoutRound =
 export interface Match {
   id: MatchId;
   stage: MatchStage;
+  /** Null for group matches; identifies the independent knockout bracket. */
+  bracketKind?: BracketKind | null;
   groupId: GroupId | null;
   knockoutRound: KnockoutRound | null;
   homeParticipantId: ParticipantId | null;

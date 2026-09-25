@@ -9,12 +9,17 @@ export const metadata = { title: "Admin" };
 export const dynamic = "force-dynamic";
 
 export default async function AdminPage() {
-  const [initialSetup, initialMatches, initialKnockoutMatches] =
-    await Promise.all([
-      getTournamentSetup(),
-      getGroupMatches(),
-      getKnockoutMatches(),
-    ]);
+  const [
+    initialSetup,
+    initialMatches,
+    initialChampionshipMatches,
+    initialConsolationMatches,
+  ] = await Promise.all([
+    getTournamentSetup(),
+    getGroupMatches(),
+    getKnockoutMatches("championship"),
+    getKnockoutMatches("consolation"),
+  ]);
   return (
     <div className="space-y-6">
       <div>
@@ -26,7 +31,8 @@ export default async function AdminPage() {
       <AdminSetup
         initialSetup={initialSetup}
         initialMatches={initialMatches}
-        initialKnockoutMatches={initialKnockoutMatches}
+        initialChampionshipMatches={initialChampionshipMatches}
+        initialConsolationMatches={initialConsolationMatches}
       />
     </div>
   );

@@ -12,13 +12,25 @@ export const metadata = { title: "Matches" };
 export const dynamic = "force-dynamic";
 
 export default async function MatchesPage() {
-  const [setup, matches, knockoutMatches] = await Promise.all([
+  const [setup, matches, championshipMatches, consolationMatches] = await Promise.all([
     getTournamentSetup(),
     getGroupMatches(),
-    getKnockoutMatches(),
+    getKnockoutMatches("championship"),
+    getKnockoutMatches("consolation"),
   ]);
 
-  const knockoutView = computeKnockoutView(setup, matches, knockoutMatches);
+  const championshipView = computeKnockoutView(
+    setup,
+    matches,
+    championshipMatches,
+    "championship",
+  );
+  const consolationView = computeKnockoutView(
+    setup,
+    matches,
+    consolationMatches,
+    "consolation",
+  );
 
   return (
     <div className="space-y-6">
@@ -48,16 +60,22 @@ export default async function MatchesPage() {
         />
       )}
 
-      {knockoutView.status === "bracket" ? (
-        <section className="space-y-3">
-          <h2 className="text-xl font-bold tracking-tight">Knockout</h2>
-          <BracketView
-            bracket={knockoutView.bracket}
-            champion={knockoutView.champion}
-            participants={setup.participants}
-          />
-        </section>
-      ) : null}
+      {([
+        ["Championship", championshipView],
+        ["Consolation", consolationView],
+      ] as const).map(([title, view]) =>
+        view.status === "bracket" ? (
+          <section key={title} className="space-y-3">
+            <h2 className="text-xl font-bold tracking-tight">{title}</h2>
+            <BracketView
+              bracket={view.bracket}
+              champion={view.champion}
+              participants={setup.participants}
+              championLabel={`${title} winner`}
+            />
+          </section>
+        ) : null,
+      )}
     </div>
   );
 }

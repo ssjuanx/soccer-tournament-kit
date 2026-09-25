@@ -52,11 +52,13 @@ import { KnockoutSection } from "./knockout-section";
 export default function AdminSetup({
   initialSetup,
   initialMatches,
-  initialKnockoutMatches,
+  initialChampionshipMatches,
+  initialConsolationMatches,
 }: {
   initialSetup: TournamentSetupSnapshot;
   initialMatches: Match[];
-  initialKnockoutMatches: Match[];
+  initialChampionshipMatches: Match[];
+  initialConsolationMatches: Match[];
 }) {
   const [participantCountRaw, setParticipantCountRaw] = useState(() =>
     initialSetup.tournament
@@ -732,11 +734,22 @@ export default function AdminSetup({
       )}
 
       {plan && (
-        <KnockoutSection
-          setup={initialSetup}
-          groupMatches={matches}
-          initialKnockoutMatches={initialKnockoutMatches}
-        />
+        <div className="space-y-8">
+          <KnockoutSection
+            bracketKind="championship"
+            title="Championship"
+            setup={initialSetup}
+            groupMatches={matches}
+            initialKnockoutMatches={initialChampionshipMatches}
+          />
+          <KnockoutSection
+            bracketKind="consolation"
+            title="Consolation"
+            setup={initialSetup}
+            groupMatches={matches}
+            initialKnockoutMatches={initialConsolationMatches}
+          />
+        </div>
       )}
     </div>
   );

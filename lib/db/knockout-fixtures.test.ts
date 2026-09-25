@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { calculateStandings } from "../tournament/standings.ts";
 import type { Match, Participant } from "../tournament/types.ts";
 import {
+  buildConsolationQualifiers,
   buildKnockoutQualifiers,
   buildKnockoutStageMatches,
   isGroupStageComplete,
@@ -105,6 +106,69 @@ test("buildKnockoutQualifiers: respects qualifiersPerGroup", () => {
   );
 });
 
+test("buildConsolationQualifiers: includes every non-qualifier", () => {
+  const byGroup = new Map([
+    ["gA", standingsA()],
+    ["gB", standingsB()],
+  ]);
+  const participants = [
+    p("a", 1, "gA"),
+    p("b", 2, "gA"),
+    p("c", 3, "gA"),
+    p("d", 4, "gA"),
+    p("e", 5, "gB"),
+    p("f", 6, "gB"),
+    p("g", 7, "gB"),
+  ];
+  const q = buildConsolationQualifiers(GROUPS, byGroup, 2, participants);
+
+  // Both third-place finishers precede the fourth-place participant. Within
+  // the third-place tier, b's points-per-game ranks above g's.
+  assert.deepEqual(
+    q.map((x) => x.participantId),
+    ["b", "g", "c"],
+  );
+  assert.deepEqual(
+    q.map((x) => x.groupPosition),
+    [3, 3, 4],
+  );
+});
+
+test("buildConsolationQualifiers: compares rates across unequal group sizes", () => {
+  const row = (
+    participantId: string,
+    played: number,
+    points: number,
+    goalDifference: number,
+    goalsFor: number,
+  ) => ({
+    participantId,
+    position: 3,
+    played,
+    wins: 0,
+    draws: 0,
+    losses: 0,
+    goalsFor,
+    goalsAgainst: goalsFor - goalDifference,
+    goalDifference,
+    points,
+    unresolved: false,
+  });
+  const byGroup = new Map([
+    ["gA", [row("three-games", 3, 4, 1, 3)]],
+    ["gB", [row("two-games", 2, 3, 0, 2)]],
+  ]);
+  const q = buildConsolationQualifiers(GROUPS, byGroup, 2, [
+    p("three-games", 1, "gA"),
+    p("two-games", 2, "gB"),
+  ]);
+
+  assert.deepEqual(
+    q.map((x) => x.participantId),
+    ["two-games", "three-games"],
+  );
+});
+
 test("buildKnockoutStageMatches: knockout rows for all rounds", () => {
   const byGroup = new Map([
     ["gA", standingsA()],
@@ -115,6 +179,7 @@ test("buildKnockoutStageMatches: knockout rows for all rounds", () => {
   // 4 qualifiers -> bracket 4 -> 2 semis + 1 final.
   assert.equal(rows.length, 3);
   assert.ok(rows.every((r) => r.stage === "knockout" && r.groupId === null));
+  assert.ok(rows.every((r) => r.bracketKind === "championship"));
   assert.ok(rows.every((r) => r.homeScore === null && r.awayScore === null));
   const semis = rows.filter((r) => r.knockoutRound === "semi_final");
   assert.equal(semis.length, 2);
@@ -141,6 +206,80 @@ test("buildKnockoutStageMatches: ids deterministic and stable", () => {
     r2.map((r: KnockoutMatchInsertRow) => r.id),
   );
   assert.ok(r1.every((r) => r.id.startsWith("active:ko:r")));
+});
+
+test("buildKnockoutStageMatches: consolation has independent ids and kind", () => {
+  const qualifiers = [
+    { participantId: "a", groupId: "gA", groupPosition: 3 },
+    { participantId: "b", groupId: "gB", groupPosition: 3 },
+    { participantId: "c", groupId: "gC", groupPosition: 3 },
+    { participantId: "d", groupId: "gD", groupPosition: 3 },
+    { participantId: "e", groupId: "gA", groupPosition: 4 },
+  ];
+  const rows = buildKnockoutStageMatches(qualifiers, TID, "consolation");
+
+  assert.equal(rows.length, 7);
+  assert.ok(rows.every((row) => row.bracketKind === "consolation"));
+  assert.ok(rows.every((row) => row.id.startsWith("active:consolation:ko:r")));
+});
+
+test("Los pibes: 12-16 players produce 4-8 consolation entries with correct byes", () => {
+  for (let totalPlayers = 12; totalPlayers <= 16; totalPlayers++) {
+    const groupSizes = [3, 3, 3, 3];
+    for (let i = 0; i < totalPlayers - 12; i++) groupSizes[i]++;
+
+    const groups = groupSizes.map((_, index) => ({
+      id: `g${index}`,
+      label: String.fromCharCode(65 + index),
+    }));
+    const standingsByGroup = new Map<string, ReturnType<typeof standingsA>>();
+    const participants: Participant[] = [];
+    let drawOrder = 1;
+
+    groups.forEach((group, groupIndex) => {
+      const rows = Array.from({ length: groupSizes[groupIndex] }, (_, index) => {
+        const id = `${group.id}p${index + 1}`;
+        participants.push(p(id, drawOrder++, group.id));
+        return {
+          participantId: id,
+          position: index + 1,
+          played: groupSizes[groupIndex] - 1,
+          wins: 0,
+          draws: 0,
+          losses: 0,
+          goalsFor: 0,
+          goalsAgainst: 0,
+          goalDifference: 0,
+          points: 0,
+          unresolved: false,
+        };
+      });
+      standingsByGroup.set(group.id, rows);
+    });
+
+    const consolation = buildConsolationQualifiers(
+      groups,
+      standingsByGroup,
+      2,
+      participants,
+    );
+    assert.equal(consolation.length, totalPlayers - 8);
+
+    const rows = buildKnockoutStageMatches(
+      consolation,
+      TID,
+      "consolation",
+    );
+    const bracketSize = totalPlayers - 8 <= 4 ? 4 : 8;
+    assert.equal(rows.length, bracketSize - 1);
+
+    const firstRound = rows.filter((row) => row.id.includes(":ko:r0:"));
+    const byes = firstRound.filter(
+      (row) =>
+        (row.homeParticipantId == null) !== (row.awayParticipantId == null),
+    );
+    assert.equal(byes.length, bracketSize - consolation.length);
+  }
 });
 
 test("buildKnockoutStageMatches: empty when fewer than 2 qualifiers", () => {

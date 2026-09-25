@@ -10,47 +10,79 @@ export const metadata = { title: "Bracket" };
 export const dynamic = "force-dynamic";
 
 export default async function BracketPage() {
-  const [setup, groupMatches, knockoutMatches] = await Promise.all([
+  const [
+    setup,
+    groupMatches,
+    championshipMatches,
+    consolationMatches,
+  ] = await Promise.all([
     getTournamentSetup(),
     getGroupMatches(),
-    getKnockoutMatches(),
+    getKnockoutMatches("championship"),
+    getKnockoutMatches("consolation"),
   ]);
 
-  const view = computeKnockoutView(setup, groupMatches, knockoutMatches);
+  const championship = computeKnockoutView(
+    setup,
+    groupMatches,
+    championshipMatches,
+    "championship",
+  );
+  const consolation = computeKnockoutView(
+    setup,
+    groupMatches,
+    consolationMatches,
+    "consolation",
+  );
 
-  let message: string | null = null;
-  if (view.status === "none") {
-    message = setup.tournament
+  const messageFor = (status: typeof championship): string | null => {
+    if (status.status === "none") {
+      return setup.tournament
       ? "Group-stage fixtures haven't been generated yet. The knockout bracket will appear here once the group stage is complete."
       : "No tournament has been set up yet. The knockout bracket will appear here once the group stage is complete.";
-  } else if (view.status === "groupStageIncomplete") {
-    message = `The group stage is in progress (${view.played} of ${view.total} matches played). The knockout bracket will appear here once the group stage is complete.`;
-  } else if (view.status === "ready") {
-    message =
-      "The group stage is complete. The knockout bracket will appear here once the administrator generates it.";
-  }
+    }
+    if (status.status === "groupStageIncomplete") {
+      return `The group stage is in progress (${status.played} of ${status.total} matches played).`;
+    }
+    if (status.status === "ready") {
+      return "The group stage is complete. This bracket will appear once the administrator generates it.";
+    }
+    return null;
+  };
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Bracket</h1>
         <p className="mt-1 text-slate-600">
-          The single-elimination knockout bracket, from the first round to the
-          final.
+          Championship and Consolation single-elimination brackets.
         </p>
       </div>
 
-      {view.status === "bracket" ? (
-        <BracketView
-          bracket={view.bracket}
-          champion={view.champion}
-          participants={setup.participants}
-        />
-      ) : (
-        <p className="rounded-lg border border-slate-200 bg-white p-5 text-slate-600">
-          {message}
-        </p>
-      )}
+      {([
+        ["Championship", championship],
+        ["Consolation", consolation],
+      ] as const).map(([title, view]) => (
+        <section key={title} className="space-y-3">
+          <h2 className="text-2xl font-bold tracking-tight">{title}</h2>
+          {view.status === "bracket" ? (
+            <BracketView
+              bracket={view.bracket}
+              champion={view.champion}
+              participants={setup.participants}
+              championLabel={
+                title === "Championship"
+                  ? "Championship winner"
+                  : "Consolation winner"
+              }
+            />
+          ) : (
+            <p className="rounded-lg border border-slate-200 bg-white p-5 text-slate-600">
+              {messageFor(view)}
+            </p>
+          )}
+        </section>
+      ))}
     </div>
   );
 }

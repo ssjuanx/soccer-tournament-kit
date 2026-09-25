@@ -19,7 +19,7 @@ import { db } from "./client.ts";
 import { matches } from "./schema.ts";
 import { ACTIVE_TOURNAMENT_ID } from "./tournaments.ts";
 import { validateScore } from "../tournament/standings.ts";
-import type { Match, MatchScore } from "../tournament/types.ts";
+import type { BracketKind, Match, MatchScore } from "../tournament/types.ts";
 import type { KnockoutMatchInsertRow, MatchInsertRow } from "./fixtures.ts";
 
 /**
@@ -41,6 +41,7 @@ export async function saveGroupFixtures(rows: MatchInsertRow[]): Promise<void> {
         id: row.id,
         tournamentId: row.tournamentId,
         stage: row.stage,
+        bracketKind: row.bracketKind,
         groupId: row.groupId,
         knockoutRound: row.knockoutRound,
         homeParticipantId: row.homeParticipantId,
@@ -92,6 +93,7 @@ export async function getGroupMatches(): Promise<Match[]> {
   return rows.map((row) => ({
     id: row.id,
     stage: "group",
+    bracketKind: null,
     groupId: row.groupId,
     knockoutRound: row.knockoutRound,
     homeParticipantId: row.homeParticipantId,
@@ -130,6 +132,27 @@ export async function saveMatchScore(
     );
 }
 
+/** Saves a score only when the id belongs to the requested knockout bracket. */
+export async function saveKnockoutMatchScore(
+  bracketKind: BracketKind,
+  matchId: string,
+  score: MatchScore | null,
+): Promise<void> {
+  if (score != null) validateScore(score);
+
+  await db
+    .update(matches)
+    .set({ homeScore: score?.home ?? null, awayScore: score?.away ?? null })
+    .where(
+      and(
+        eq(matches.id, matchId),
+        eq(matches.tournamentId, ACTIVE_TOURNAMENT_ID),
+        eq(matches.stage, "knockout"),
+        eq(matches.bracketKind, bracketKind),
+      ),
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Knockout stage
 // ---------------------------------------------------------------------------
@@ -154,6 +177,7 @@ export async function saveKnockoutFixtures(
         id: row.id,
         tournamentId: row.tournamentId,
         stage: row.stage,
+        bracketKind: row.bracketKind,
         groupId: row.groupId,
         knockoutRound: row.knockoutRound,
         knockoutSeed: row.knockoutSeed,
@@ -168,6 +192,7 @@ export async function saveKnockoutFixtures(
       set: {
         homeParticipantId: sql`excluded.home_participant_id`,
         awayParticipantId: sql`excluded.away_participant_id`,
+        bracketKind: sql`excluded.bracket_kind`,
         knockoutRound: sql`excluded.knockout_round`,
         knockoutSeed: sql`excluded.knockout_seed`,
       },
@@ -178,13 +203,16 @@ export async function saveKnockoutFixtures(
  * Deletes all knockout matches for the active tournament (including scores).
  * Used to force a clean bracket regeneration.
  */
-export async function clearKnockoutFixtures(): Promise<void> {
+export async function clearKnockoutFixtures(
+  bracketKind: BracketKind,
+): Promise<void> {
   await db
     .delete(matches)
     .where(
       and(
         eq(matches.tournamentId, ACTIVE_TOURNAMENT_ID),
         eq(matches.stage, "knockout"),
+        eq(matches.bracketKind, bracketKind),
       ),
     );
 }
@@ -196,7 +224,9 @@ export async function clearKnockoutFixtures(): Promise<void> {
  * domain `MatchScore` shape (null when the match is unplayed). `knockoutSeed`
  * is the home (higher) seed, for ordering and display.
  */
-export async function getKnockoutMatches(): Promise<Match[]> {
+export async function getKnockoutMatches(
+  bracketKind: BracketKind,
+): Promise<Match[]> {
   const rows = await db
     .select()
     .from(matches)
@@ -204,6 +234,7 @@ export async function getKnockoutMatches(): Promise<Match[]> {
       and(
         eq(matches.tournamentId, ACTIVE_TOURNAMENT_ID),
         eq(matches.stage, "knockout"),
+        eq(matches.bracketKind, bracketKind),
       ),
     )
     .orderBy(asc(matches.id));
@@ -211,6 +242,7 @@ export async function getKnockoutMatches(): Promise<Match[]> {
   return rows.map((row) => ({
     id: row.id,
     stage: "knockout",
+    bracketKind: row.bracketKind,
     groupId: row.groupId,
     knockoutRound: row.knockoutRound,
     knockoutSeed: row.knockoutSeed,

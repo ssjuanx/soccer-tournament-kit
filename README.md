@@ -6,9 +6,9 @@ read-only website to follow the group stage and knockout bracket.
 
 ## Status
 
-This repository contains the initial foundation: a Next.js app with a landing
-page and placeholder routes. Tournament logic, data entry, and persistence are
-not implemented yet and will be added incrementally.
+The app supports tournament setup, balanced round-robin groups, score entry,
+standings, and independent Championship and Consolation brackets. Data is
+persisted in Neon Postgres and the public pages are read-only.
 
 ## Planned features
 
@@ -21,9 +21,6 @@ not implemented yet and will be added incrementally.
 - **Admin area** &mdash; a single administrator manages participants, teams,
   and match scores.
 
-> Persistence (database, storage) and authentication are intentionally
-> undecided for now. They will be chosen when data entry is implemented.
-
 ## Tech stack
 
 - [Next.js](https://nextjs.org) with the App Router
@@ -34,6 +31,18 @@ not implemented yet and will be added incrementally.
 ## Getting started
 
 Requires Node.js 20.9 or newer (developed with Node 24).
+
+Create `.env.local` with:
+
+```env
+DATABASE_URL=your_pooled_neon_connection_string
+DATABASE_URL_UNPOOLED=your_direct_neon_connection_string
+ADMIN_PASSWORD=choose_a_private_admin_password
+```
+
+`ADMIN_PASSWORD` protects `/admin` with HTTP Basic authentication in
+production. Production returns an error instead of exposing the admin when the
+variable is missing.
 
 ```bash
 # Install dependencies

@@ -30,6 +30,7 @@ import {
 import { getQualifiedParticipants } from "../tournament/qualification.ts";
 import { compareGroupLabels } from "./setup.ts";
 import type {
+  BracketKind,
   GroupId,
   KnockoutRound,
   Match,
@@ -54,6 +55,7 @@ export interface MatchInsertRow {
   id: string;
   tournamentId: string;
   stage: "group";
+  bracketKind: null;
   groupId: string;
   knockoutRound: null;
   homeParticipantId: string;
@@ -138,6 +140,7 @@ export function buildGroupStageMatches(
         id: match.id,
         tournamentId,
         stage: "group",
+        bracketKind: null,
         groupId: group.id,
         knockoutRound: null,
         homeParticipantId: match.homeParticipantId as string,
@@ -223,6 +226,7 @@ export interface KnockoutMatchInsertRow {
   id: string;
   tournamentId: string;
   stage: "knockout";
+  bracketKind: BracketKind;
   groupId: null;
   knockoutRound: KnockoutRound;
   knockoutSeed: number | null;
@@ -307,6 +311,80 @@ export function buildKnockoutQualifiers(
 }
 
 /**
+ * Builds the Consolation seed list from everyone below the qualification line.
+ * Finish position is the primary tier. Within a tier, per-game rates make
+ * groups of three and four comparable; draw order is the deterministic final
+ * fallback. Ratio comparisons use cross multiplication instead of floats.
+ */
+export function buildConsolationQualifiers(
+  groups: { id: string; label: string }[],
+  standingsByGroup: Map<string, Standing>,
+  qualifiersPerGroup: number,
+  participants: { id: string; drawOrder: number }[],
+): Qualifier[] {
+  const drawOrderById = new Map(
+    participants.map((participant) => [participant.id, participant.drawOrder]),
+  );
+  const entries: Array<{ row: Standing[number]; groupId: string }> = [];
+
+  for (const group of groups) {
+    for (const row of standingsByGroup.get(group.id) ?? []) {
+      if (row.position > qualifiersPerGroup) {
+        entries.push({ row, groupId: group.id });
+      }
+    }
+  }
+
+  const compareRateDescending = (
+    aValue: number,
+    aPlayed: number,
+    bValue: number,
+    bPlayed: number,
+  ) => bValue * aPlayed - aValue * bPlayed;
+
+  entries.sort((a, b) => {
+    if (a.row.position !== b.row.position) {
+      return a.row.position - b.row.position;
+    }
+
+    const points = compareRateDescending(
+      a.row.points,
+      a.row.played,
+      b.row.points,
+      b.row.played,
+    );
+    if (points !== 0) return points;
+
+    const goalDifference = compareRateDescending(
+      a.row.goalDifference,
+      a.row.played,
+      b.row.goalDifference,
+      b.row.played,
+    );
+    if (goalDifference !== 0) return goalDifference;
+
+    const goalsFor = compareRateDescending(
+      a.row.goalsFor,
+      a.row.played,
+      b.row.goalsFor,
+      b.row.played,
+    );
+    if (goalsFor !== 0) return goalsFor;
+
+    return (
+      (drawOrderById.get(a.row.participantId) ?? Number.MAX_SAFE_INTEGER) -
+      (drawOrderById.get(b.row.participantId) ?? Number.MAX_SAFE_INTEGER)
+    );
+  });
+
+  return entries.map(({ row, groupId }) => ({
+    participantId: row.participantId,
+    groupId: groupId as GroupId,
+    groupPosition: row.position,
+  }));
+}
+
+/**
  * Builds the full set of knockout match rows for a seeded qualifier list.
  *
  * Uses the persistence-free `generateBracket` engine, so the persisted knockout
@@ -317,13 +395,19 @@ export function buildKnockoutQualifiers(
 export function buildKnockoutStageMatches(
   qualifiers: Qualifier[],
   tournamentId: string,
+  bracketKind: BracketKind = "championship",
 ): KnockoutMatchInsertRow[] {
   if (qualifiers.length < 2) return [];
-  const bracket = generateBracket(qualifiers, tournamentId);
+  const bracketId =
+    bracketKind === "championship"
+      ? tournamentId
+      : `${tournamentId}:consolation`;
+  const bracket = generateBracket(qualifiers, bracketId);
   return bracketToMatches(bracket).map((m) => ({
     id: m.id,
     tournamentId,
     stage: "knockout",
+    bracketKind,
     groupId: null,
     knockoutRound: m.knockoutRound!,
     knockoutSeed: m.knockoutSeed ?? null,
@@ -368,6 +452,7 @@ export function computeKnockoutView(
   snapshot: TournamentSetupSnapshot,
   groupMatches: Match[],
   knockoutMatches: Match[],
+  bracketKind: BracketKind = "championship",
 ): KnockoutView {
   if (!snapshot.tournament || groupMatches.length === 0) {
     return { status: "none" };
@@ -408,11 +493,19 @@ export function computeKnockoutView(
     );
   }
 
-  const qualifiers = buildKnockoutQualifiers(
-    snapshot.groups,
-    standingsByGroup,
-    tournament.qualifiersPerGroup,
-  );
+  const qualifiers =
+    bracketKind === "championship"
+      ? buildKnockoutQualifiers(
+          snapshot.groups,
+          standingsByGroup,
+          tournament.qualifiersPerGroup,
+        )
+      : buildConsolationQualifiers(
+          snapshot.groups,
+          standingsByGroup,
+          tournament.qualifiersPerGroup,
+          snapshot.participants,
+        );
 
   if (knockoutMatches.length === 0) {
     return { status: "ready" };
@@ -422,7 +515,11 @@ export function computeKnockoutView(
     return { status: "ready" };
   }
 
-  const bracket = generateBracket(qualifiers, tournament.id);
+  const bracketId =
+    bracketKind === "championship"
+      ? tournament.id
+      : `${tournament.id}:consolation`;
+  const bracket = generateBracket(qualifiers, bracketId);
   const scoreById = new Map<string, MatchScore>();
   for (const m of knockoutMatches) {
     if (m.score != null) scoreById.set(m.id, m.score);

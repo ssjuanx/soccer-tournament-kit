@@ -32,6 +32,7 @@ export const TOURNAMENT_STATUSES = [
 ] as const;
 
 export const MATCH_STAGES = ["group", "knockout"] as const;
+export const BRACKET_KINDS = ["championship", "consolation"] as const;
 
 export const KNOCKOUT_ROUNDS = [
   "round_of_64",
@@ -133,6 +134,7 @@ export const matches = pgTable(
       .notNull()
       .references(() => tournaments.id, { onDelete: "cascade" }),
     stage: text("stage", { enum: MATCH_STAGES }).notNull(),
+    bracketKind: text("bracket_kind", { enum: BRACKET_KINDS }),
     groupId: text("group_id").references(() => groups.id, {
       onDelete: "set null",
     }),
