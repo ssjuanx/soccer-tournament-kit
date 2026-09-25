@@ -1,7 +1,9 @@
 import { compareGroupLabels, type SavedParticipant } from "@/lib/db/setup";
 import { getTournamentSetup } from "@/lib/db/tournaments";
-import { getGroupMatches } from "@/lib/db/matches";
+import { getGroupMatches, getKnockoutMatches } from "@/lib/db/matches";
+import { computeKnockoutView } from "@/lib/db/fixtures";
 import type { Match } from "@/lib/tournament/types";
+import { BracketView } from "../bracket/bracket-view";
 
 export const metadata = { title: "Matches" };
 
@@ -10,17 +12,21 @@ export const metadata = { title: "Matches" };
 export const dynamic = "force-dynamic";
 
 export default async function MatchesPage() {
-  const [setup, matches] = await Promise.all([
+  const [setup, matches, knockoutMatches] = await Promise.all([
     getTournamentSetup(),
     getGroupMatches(),
+    getKnockoutMatches(),
   ]);
+
+  const knockoutView = computeKnockoutView(setup, matches, knockoutMatches);
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Matches</h1>
         <p className="mt-1 text-slate-600">
-          Every scheduled group-stage match and its final score.
+          Every scheduled group-stage match, its final score, and the knockout
+          bracket.
         </p>
       </div>
 
@@ -41,6 +47,17 @@ export default async function MatchesPage() {
           matches={matches}
         />
       )}
+
+      {knockoutView.status === "bracket" ? (
+        <section className="space-y-3">
+          <h2 className="text-xl font-bold tracking-tight">Knockout</h2>
+          <BracketView
+            bracket={knockoutView.bracket}
+            champion={knockoutView.champion}
+            participants={setup.participants}
+          />
+        </section>
+      ) : null}
     </div>
   );
 }

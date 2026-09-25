@@ -38,6 +38,7 @@ import {
   saveTournamentMetadataAction,
   saveTournamentRulesAction,
 } from "@/lib/db/actions";
+import { KnockoutSection } from "./knockout-section";
 
 /**
  * Admin tournament setup: configure participant + group counts, preview the
@@ -51,9 +52,11 @@ import {
 export default function AdminSetup({
   initialSetup,
   initialMatches,
+  initialKnockoutMatches,
 }: {
   initialSetup: TournamentSetupSnapshot;
   initialMatches: Match[];
+  initialKnockoutMatches: Match[];
 }) {
   const [participantCountRaw, setParticipantCountRaw] = useState(() =>
     initialSetup.tournament
@@ -120,6 +123,11 @@ export default function AdminSetup({
     initialSetup.tournament
       ? String(initialSetup.tournament.lossPoints)
       : String(DEFAULT_SCORING_CONFIG.lossPoints),
+  );
+  const [qualifiersPerGroupRaw, setQualifiersPerGroupRaw] = useState(() =>
+    initialSetup.tournament
+      ? String(initialSetup.tournament.qualifiersPerGroup)
+      : "2",
   );
   const [tiebreakerOrder, setTiebreakerOrder] = useState<TiebreakerKey[]>(() =>
     initialSetup.tournament
@@ -352,6 +360,7 @@ export default function AdminSetup({
       drawPointsRaw,
       lossPointsRaw,
       tiebreakerOrder,
+      qualifiersPerGroupRaw,
     );
     if (result.ok) {
       setRulesStatus("saved");
@@ -671,6 +680,7 @@ export default function AdminSetup({
           winPointsRaw={winPointsRaw}
           drawPointsRaw={drawPointsRaw}
           lossPointsRaw={lossPointsRaw}
+          qualifiersPerGroupRaw={qualifiersPerGroupRaw}
           tiebreakerOrder={tiebreakerOrder}
           rulesStatus={rulesStatus}
           onWinChange={(v) => {
@@ -683,6 +693,10 @@ export default function AdminSetup({
           }}
           onLossChange={(v) => {
             setLossPointsRaw(v);
+            setRulesStatus("unsaved");
+          }}
+          onQualifiersChange={(v) => {
+            setQualifiersPerGroupRaw(v);
             setRulesStatus("unsaved");
           }}
           onMoveTiebreaker={moveTiebreaker}
@@ -714,6 +728,14 @@ export default function AdminSetup({
           onSaveScore={handleSaveScore}
           participantById={participantById}
           groupLabelById={groupLabelById}
+        />
+      )}
+
+      {plan && (
+        <KnockoutSection
+          setup={initialSetup}
+          groupMatches={matches}
+          initialKnockoutMatches={initialKnockoutMatches}
         />
       )}
     </div>
@@ -1125,11 +1147,13 @@ interface RulesSectionProps {
   winPointsRaw: string;
   drawPointsRaw: string;
   lossPointsRaw: string;
+  qualifiersPerGroupRaw: string;
   tiebreakerOrder: TiebreakerKey[];
   rulesStatus: "saved" | "saving" | "unsaved";
   onWinChange: (value: string) => void;
   onDrawChange: (value: string) => void;
   onLossChange: (value: string) => void;
+  onQualifiersChange: (value: string) => void;
   onMoveTiebreaker: (index: number, direction: -1 | 1) => void;
   onToggleTiebreaker: (key: TiebreakerKey) => void;
   onSaveRules: () => void;
@@ -1146,11 +1170,13 @@ function RulesSection({
   winPointsRaw,
   drawPointsRaw,
   lossPointsRaw,
+  qualifiersPerGroupRaw,
   tiebreakerOrder,
   rulesStatus,
   onWinChange,
   onDrawChange,
   onLossChange,
+  onQualifiersChange,
   onMoveTiebreaker,
   onToggleTiebreaker,
   onSaveRules,
@@ -1197,6 +1223,20 @@ function RulesSection({
             step={1}
             value={lossPointsRaw}
             onChange={(e) => onLossChange(e.target.value)}
+            className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
+          />
+        </label>
+        <label className="block">
+          <span className="text-sm font-medium text-slate-700">
+            Qualifiers per group
+          </span>
+          <input
+            type="number"
+            inputMode="numeric"
+            step={1}
+            min={1}
+            value={qualifiersPerGroupRaw}
+            onChange={(e) => onQualifiersChange(e.target.value)}
             className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
           />
         </label>

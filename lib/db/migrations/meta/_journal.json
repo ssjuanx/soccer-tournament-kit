@@ -29,6 +29,13 @@
       "when": 1790266910282,
       "tag": "0003_cohort_manual_tiebreak",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1790270493942,
+      "tag": "0004_knockout",
+      "breakpoints": true
     }
   ]
 }

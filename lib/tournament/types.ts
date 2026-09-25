@@ -198,6 +198,12 @@ export interface Match {
   homeParticipantId: ParticipantId | null;
   awayParticipantId: ParticipantId | null;
   score: MatchScore | null;
+  /**
+   * For knockout matches: the home (higher) bracket seed of the match, used for
+   * stable ordering and seed display. Null when the home slot is still TBD.
+   * Always null/undefined for group-stage matches.
+   */
+  knockoutSeed?: number | null;
 }
 
 // ---------------------------------------------------------------------------

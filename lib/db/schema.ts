@@ -73,6 +73,10 @@ export const tournaments = pgTable("tournaments", {
   // to stay consistent with the text-based-enum pattern and avoid Neon HTTP
   // driver friction. Null means "use the default order".
   tiebreakerOrder: text("tiebreaker_order"),
+  // How many participants qualify from each group into the knockout stage
+  // (default 2 = group winner + runner-up). Tournament-owned so an organizer
+  // can tune the bracket size; editable via the rules form.
+  qualifiersPerGroup: integer("qualifiers_per_group").notNull().default(2),
 });
 
 export const groups = pgTable(
@@ -144,6 +148,10 @@ export const matches = pgTable(
     // Null until the match is played; flattened from the domain `MatchScore`.
     homeScore: integer("home_score"),
     awayScore: integer("away_score"),
+    // For knockout matches: the home (higher) bracket seed of the match, used
+    // for stable ordering and seed display. Null for group-stage matches and
+    // for knockout matches whose home slot is still TBD.
+    knockoutSeed: integer("knockout_seed"),
   },
   (table) => [
     index("matches_tournament_id_idx").on(table.tournamentId),

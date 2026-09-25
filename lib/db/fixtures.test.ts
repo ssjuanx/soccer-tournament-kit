@@ -63,6 +63,7 @@ function snapshot(
       drawPoints: 1,
       lossPoints: 0,
       tiebreakerOrder: ["goal_difference", "goals_for"],
+      qualifiersPerGroup: 2,
     },
     groups,
     participants,

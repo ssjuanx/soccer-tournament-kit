@@ -20,7 +20,7 @@ import { matches } from "./schema.ts";
 import { ACTIVE_TOURNAMENT_ID } from "./tournaments.ts";
 import { validateScore } from "../tournament/standings.ts";
 import type { Match, MatchScore } from "../tournament/types.ts";
-import type { MatchInsertRow } from "./fixtures.ts";
+import type { KnockoutMatchInsertRow, MatchInsertRow } from "./fixtures.ts";
 
 /**
  * Upserts group-stage fixtures for the active tournament.
@@ -63,17 +63,13 @@ export async function saveGroupFixtures(rows: MatchInsertRow[]): Promise<void> {
  * Deletes all group-stage matches for the active tournament.
  *
  * This is the only way to unlock participant/group editing once fixtures exist.
- * Knockout matches (none generated yet) are intentionally left untouched.
+ * Knockout matches are also deleted here, since the knockout bracket is derived
+ * from the group standings — clearing the group stage invalidates it.
  */
 export async function clearGroupFixtures(): Promise<void> {
   await db
     .delete(matches)
-    .where(
-      and(
-        eq(matches.tournamentId, ACTIVE_TOURNAMENT_ID),
-        eq(matches.stage, "group"),
-      ),
-    );
+    .where(eq(matches.tournamentId, ACTIVE_TOURNAMENT_ID));
 }
 
 /**
@@ -132,4 +128,97 @@ export async function saveMatchScore(
         eq(matches.tournamentId, ACTIVE_TOURNAMENT_ID),
       ),
     );
+}
+
+// ---------------------------------------------------------------------------
+// Knockout stage
+// ---------------------------------------------------------------------------
+
+/**
+ * Upserts knockout bracket fixtures for the active tournament.
+ *
+ * New rows are inserted with null scores. Existing rows (same id) are updated
+ * on the pairing/seed columns only — scores are intentionally left out of the
+ * `onConflictDoUpdate` set so already-entered scores survive a re-generation.
+ * Call `clearKnockoutFixtures` first to force a clean regeneration.
+ */
+export async function saveKnockoutFixtures(
+  rows: KnockoutMatchInsertRow[],
+): Promise<void> {
+  if (rows.length === 0) return;
+
+  await db
+    .insert(matches)
+    .values(
+      rows.map((row) => ({
+        id: row.id,
+        tournamentId: row.tournamentId,
+        stage: row.stage,
+        groupId: row.groupId,
+        knockoutRound: row.knockoutRound,
+        knockoutSeed: row.knockoutSeed,
+        homeParticipantId: row.homeParticipantId,
+        awayParticipantId: row.awayParticipantId,
+        homeScore: row.homeScore,
+        awayScore: row.awayScore,
+      })),
+    )
+    .onConflictDoUpdate({
+      target: matches.id,
+      set: {
+        homeParticipantId: sql`excluded.home_participant_id`,
+        awayParticipantId: sql`excluded.away_participant_id`,
+        knockoutRound: sql`excluded.knockout_round`,
+        knockoutSeed: sql`excluded.knockout_seed`,
+      },
+    });
+}
+
+/**
+ * Deletes all knockout matches for the active tournament (including scores).
+ * Used to force a clean bracket regeneration.
+ */
+export async function clearKnockoutFixtures(): Promise<void> {
+  await db
+    .delete(matches)
+    .where(
+      and(
+        eq(matches.tournamentId, ACTIVE_TOURNAMENT_ID),
+        eq(matches.stage, "knockout"),
+      ),
+    );
+}
+
+/**
+ * Loads all knockout matches for the active tournament, ordered by id so the
+ * bracket is stable across reads (ids encode the round and match index, so
+ * this yields round-then-match order). Scores are flattened back into the
+ * domain `MatchScore` shape (null when the match is unplayed). `knockoutSeed`
+ * is the home (higher) seed, for ordering and display.
+ */
+export async function getKnockoutMatches(): Promise<Match[]> {
+  const rows = await db
+    .select()
+    .from(matches)
+    .where(
+      and(
+        eq(matches.tournamentId, ACTIVE_TOURNAMENT_ID),
+        eq(matches.stage, "knockout"),
+      ),
+    )
+    .orderBy(asc(matches.id));
+
+  return rows.map((row) => ({
+    id: row.id,
+    stage: "knockout",
+    groupId: row.groupId,
+    knockoutRound: row.knockoutRound,
+    knockoutSeed: row.knockoutSeed,
+    homeParticipantId: row.homeParticipantId,
+    awayParticipantId: row.awayParticipantId,
+    score:
+      row.homeScore == null || row.awayScore == null
+        ? null
+        : { home: row.homeScore, away: row.awayScore },
+  }));
 }

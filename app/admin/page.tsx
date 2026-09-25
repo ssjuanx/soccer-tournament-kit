@@ -1,6 +1,6 @@
 import AdminSetup from "./admin-setup";
 import { getTournamentSetup } from "@/lib/db/tournaments";
-import { getGroupMatches } from "@/lib/db/matches";
+import { getGroupMatches, getKnockoutMatches } from "@/lib/db/matches";
 
 export const metadata = { title: "Admin" };
 
@@ -9,10 +9,12 @@ export const metadata = { title: "Admin" };
 export const dynamic = "force-dynamic";
 
 export default async function AdminPage() {
-  const [initialSetup, initialMatches] = await Promise.all([
-    getTournamentSetup(),
-    getGroupMatches(),
-  ]);
+  const [initialSetup, initialMatches, initialKnockoutMatches] =
+    await Promise.all([
+      getTournamentSetup(),
+      getGroupMatches(),
+      getKnockoutMatches(),
+    ]);
   return (
     <div className="space-y-6">
       <div>
@@ -21,7 +23,11 @@ export default async function AdminPage() {
           Configure the tournament and enter the drawn participants and teams.
         </p>
       </div>
-      <AdminSetup initialSetup={initialSetup} initialMatches={initialMatches} />
+      <AdminSetup
+        initialSetup={initialSetup}
+        initialMatches={initialMatches}
+        initialKnockoutMatches={initialKnockoutMatches}
+      />
     </div>
   );
 }

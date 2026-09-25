@@ -140,6 +140,7 @@ test("mapSetupToEntries: maps participants to entries keyed by draw order", () =
       drawPoints: 1,
       lossPoints: 0,
       tiebreakerOrder: ["goal_difference", "goals_for"],
+      qualifiersPerGroup: 2,
     },
     groups: [
       { id: "active:group:A", label: "A" },

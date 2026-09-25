@@ -57,6 +57,11 @@ export interface SavedTournament {
    * order. Always a valid `TiebreakerOrder` (never null) on a saved snapshot.
    */
   tiebreakerOrder: TiebreakerOrder;
+  /**
+   * How many participants qualify from each group into the knockout stage
+   * (default 2). Tournament-owned configuration used to build the bracket.
+   */
+  qualifiersPerGroup: number;
 }
 
 /** A persisted group, without the `tournamentId` (implicit from the snapshot). */

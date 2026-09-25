@@ -1,0 +1,148 @@
+import type { SavedParticipant } from "@/lib/db/setup";
+import type { BracketMatch } from "@/lib/tournament/knockout";
+import type { KnockoutRound } from "@/lib/tournament/types";
+
+const ROUND_LABELS: Record<KnockoutRound, string> = {
+  round_of_64: "Round of 64",
+  round_of_32: "Round of 32",
+  round_of_16: "Round of 16",
+  quarter_final: "Quarter-finals",
+  semi_final: "Semi-finals",
+  final: "Final",
+};
+
+interface BracketViewProps {
+  bracket: BracketMatch[];
+  champion: string | null;
+  participants: SavedParticipant[];
+}
+
+export function BracketView({
+  bracket,
+  champion,
+  participants,
+}: BracketViewProps) {
+  const participantById = new Map<string, SavedParticipant>();
+  for (const p of participants) participantById.set(p.id, p);
+
+  // Group matches by round index (already ordered round-then-match).
+  const rounds = new Map<number, BracketMatch[]>();
+  for (const m of bracket) {
+    const list = rounds.get(m.roundIndex);
+    if (list) list.push(m);
+    else rounds.set(m.roundIndex, [m]);
+  }
+  const roundIndices = [...rounds.keys()].sort((a, b) => a - b);
+
+  return (
+    <div className="space-y-6">
+      {champion != null ? (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 p-5">
+          <h2 className="text-lg font-semibold text-amber-900">
+            🏆 Champion: {participantById.get(champion)?.name ?? "TBD"}
+            {participantById.get(champion)?.teamName ? (
+              <span className="text-amber-700">
+                {" "}
+                ({participantById.get(champion)!.teamName})
+              </span>
+            ) : null}
+          </h2>
+        </div>
+      ) : null}
+
+      <div className="grid gap-4 lg:grid-cols-3 xl:grid-cols-4">
+        {roundIndices.map((roundIndex) => {
+          const matches = rounds.get(roundIndex)!;
+          const label = ROUND_LABELS[matches[0].knockoutRound];
+          return (
+            <section
+              key={roundIndex}
+              className="rounded-lg border border-slate-200 bg-white p-4"
+            >
+              <h2 className="mb-3 text-sm font-semibold text-slate-900">
+                {label}
+              </h2>
+              <ul className="space-y-2">
+                {matches.map((m) => (
+                  <BracketMatchRow
+                    key={m.id}
+                    match={m}
+                    participantById={participantById}
+                  />
+                ))}
+              </ul>
+            </section>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function BracketMatchRow({
+  match,
+  participantById,
+}: {
+  match: BracketMatch;
+  participantById: Map<string, SavedParticipant>;
+}) {
+  const home = match.home.participantId
+    ? participantById.get(match.home.participantId)
+    : null;
+  const away = match.away.participantId
+    ? participantById.get(match.away.participantId)
+    : null;
+  const isBye =
+    match.roundIndex === 0 &&
+    (match.home.participantId == null) !==
+      (match.away.participantId == null);
+  const played = match.score != null;
+  const homeWon = played && match.score!.home > match.score!.away;
+  const awayWon = played && match.score!.away > match.score!.home;
+
+  return (
+    <li className="rounded-md border border-slate-100 bg-slate-50 px-3 py-2">
+      <div className="flex items-center justify-between gap-2">
+        <SeedBadge seed={match.home.seed} />
+        <span
+          className={`flex-1 truncate text-sm ${
+            homeWon ? "font-semibold text-slate-900" : "text-slate-700"
+          }`}
+        >
+          {home ? home.name : isBye ? "Bye" : "TBD"}
+          {home?.teamName ? (
+            <span className="text-slate-500"> ({home.teamName})</span>
+          ) : null}
+        </span>
+        <span className="min-w-[2.5rem] text-right text-sm font-semibold text-slate-900">
+          {played ? match.score!.home : ""}
+        </span>
+      </div>
+      <div className="mt-1 flex items-center justify-between gap-2">
+        <SeedBadge seed={match.away.seed} />
+        <span
+          className={`flex-1 truncate text-sm ${
+            awayWon ? "font-semibold text-slate-900" : "text-slate-700"
+          }`}
+        >
+          {away ? away.name : isBye ? "Bye" : "TBD"}
+          {away?.teamName ? (
+            <span className="text-slate-500"> ({away.teamName})</span>
+          ) : null}
+        </span>
+        <span className="min-w-[2.5rem] text-right text-sm font-semibold text-slate-900">
+          {played ? match.score!.away : ""}
+        </span>
+      </div>
+    </li>
+  );
+}
+
+function SeedBadge({ seed }: { seed: number | null }) {
+  if (seed == null) return <span className="min-w-[1.75rem]" />;
+  return (
+    <span className="min-w-[1.75rem] rounded bg-slate-200 px-1.5 py-0.5 text-center text-xs font-medium text-slate-600">
+      {seed}
+    </span>
+  );
+}

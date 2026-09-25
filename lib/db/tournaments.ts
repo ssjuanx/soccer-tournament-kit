@@ -113,6 +113,7 @@ export async function getTournamentSetup(): Promise<TournamentSetupSnapshot> {
     drawPoints: tournament.drawPoints,
     lossPoints: tournament.lossPoints,
     tiebreakerOrder: parseTiebreakerOrder(tournament.tiebreakerOrder),
+    qualifiersPerGroup: tournament.qualifiersPerGroup,
   };
 
   const savedParticipants: SavedParticipant[] = participantRows.map((p) => ({
@@ -387,6 +388,7 @@ export async function saveTournamentMetadata(input: {
 export async function saveTournamentRules(
   scoring: ScoringConfig,
   tiebreakerOrder: TiebreakerOrder,
+  qualifiersPerGroup: number,
 ): Promise<void> {
   const [existing] = await db
     .select({ id: tournaments.id })
@@ -409,6 +411,7 @@ export async function saveTournamentRules(
       drawPoints: scoring.drawPoints,
       lossPoints: scoring.lossPoints,
       tiebreakerOrder: serializeTiebreakerOrder(normalizedOrder),
+      qualifiersPerGroup,
     })
     .where(eq(tournaments.id, ACTIVE_TOURNAMENT_ID));
 }

@@ -17,8 +17,26 @@
  */
 
 import { generateGroupFixtures } from "../tournament/fixtures.ts";
-import { validateScore } from "../tournament/standings.ts";
-import type { Match, MatchScore } from "../tournament/types.ts";
+import { calculateStandings, validateScore } from "../tournament/standings.ts";
+import {
+  advanceBracket,
+  applyScores,
+  bracketToMatches,
+  generateBracket,
+  getChampion,
+  type BracketMatch,
+  type Qualifier,
+} from "../tournament/knockout.ts";
+import { getQualifiedParticipants } from "../tournament/qualification.ts";
+import { compareGroupLabels } from "./setup.ts";
+import type {
+  GroupId,
+  KnockoutRound,
+  Match,
+  MatchScore,
+  ParticipantId,
+  Standing,
+} from "../tournament/types.ts";
 import type { TournamentSetupSnapshot } from "./setup.ts";
 
 // ---------------------------------------------------------------------------
@@ -187,4 +205,229 @@ export function parseScore(homeRaw: string, awayRaw: string): ParsedScore {
  */
 export function isStructurallyLocked(existingMatches: Match[]): boolean {
   return existingMatches.length > 0;
+}
+
+// ---------------------------------------------------------------------------
+// Knockout stage
+// ---------------------------------------------------------------------------
+
+/**
+ * A knockout match row ready to be inserted by `saveKnockoutFixtures`.
+ *
+ * `homeScore` / `awayScore` are always `null` here: a freshly generated bracket
+ * has no scores. Existing scores are preserved by the upsert, so this only
+ * ever writes nulls for *new* rows. `knockoutSeed` is the home (higher) seed,
+ * or null when the home slot is still TBD (later rounds).
+ */
+export interface KnockoutMatchInsertRow {
+  id: string;
+  tournamentId: string;
+  stage: "knockout";
+  groupId: null;
+  knockoutRound: KnockoutRound;
+  knockoutSeed: number | null;
+  homeParticipantId: string | null;
+  awayParticipantId: string | null;
+  homeScore: null;
+  awayScore: null;
+}
+
+/**
+ * Whether the group stage is complete: every group-stage fixture has been
+ * played (a score entered). Knockout generation is only allowed once the group
+ * stage is complete so the qualifiers are final.
+ */
+export function isGroupStageComplete(groupMatches: Match[]): boolean {
+  return (
+    groupMatches.length > 0 &&
+    groupMatches.every((m) => m.score != null)
+  );
+}
+
+/**
+ * Whether any group's standings still contain an unresolved tiebreak cohort.
+ * Knockout generation is blocked while any group is unresolved, since the
+ * qualified participants (and their seeds) would be ambiguous.
+ */
+export function hasUnresolvedStandings(standingsByGroup: Standing[]): boolean {
+  return standingsByGroup.some((rows) => rows.some((r) => r.unresolved));
+}
+
+/**
+ * Builds the ordered seed list of knockout qualifiers from each group's
+ * (already sorted) standings.
+ *
+ * Qualifiers are organized in tiers by their within-group position (group
+ * winners first, then runners-up, …). Within a tier, groups are ordered by
+ * label (A, B, …) so the global seed list is deterministic. The returned list is
+ * in global seed order (seed 1 first), ready for `generateBracket`.
+ */
+export function buildKnockoutQualifiers(
+  groups: { id: string; label: string }[],
+  standingsByGroup: Map<string, Standing>,
+  qualifiersPerGroup: number,
+): Qualifier[] {
+  const orderedGroups = [...groups].sort((a, b) =>
+    compareGroupLabels(a.label, b.label),
+  );
+
+  // tier.get(position) -> qualifiers at that within-group position, in group
+  // label order.
+  const tiers = new Map<number, Qualifier[]>();
+  for (const group of orderedGroups) {
+    const standings = standingsByGroup.get(group.id);
+    if (!standings) continue;
+    const qualified = getQualifiedParticipants(standings, qualifiersPerGroup);
+    for (const row of qualified) {
+      const list = tiers.get(row.position);
+      if (list) {
+        list.push({
+          participantId: row.participantId,
+          groupId: group.id as GroupId,
+          groupPosition: row.position,
+        });
+      } else {
+        tiers.set(row.position, [
+          {
+            participantId: row.participantId,
+            groupId: group.id as GroupId,
+            groupPosition: row.position,
+          },
+        ]);
+      }
+    }
+  }
+
+  const positions = [...tiers.keys()].sort((a, b) => a - b);
+  const seedList: Qualifier[] = [];
+  for (const position of positions) {
+    seedList.push(...(tiers.get(position) ?? []));
+  }
+  return seedList;
+}
+
+/**
+ * Builds the full set of knockout match rows for a seeded qualifier list.
+ *
+ * Uses the persistence-free `generateBracket` engine, so the persisted knockout
+ * pairings are exactly the ones the bracket page later recomputes. Match ids
+ * are deterministic (`${tournamentId}:ko:r${round}:m${index}`), which keeps the
+ * upsert idempotent and lets re-generation preserve existing scores.
+ */
+export function buildKnockoutStageMatches(
+  qualifiers: Qualifier[],
+  tournamentId: string,
+): KnockoutMatchInsertRow[] {
+  if (qualifiers.length < 2) return [];
+  const bracket = generateBracket(qualifiers, tournamentId);
+  return bracketToMatches(bracket).map((m) => ({
+    id: m.id,
+    tournamentId,
+    stage: "knockout",
+    groupId: null,
+    knockoutRound: m.knockoutRound!,
+    knockoutSeed: m.knockoutSeed ?? null,
+    homeParticipantId: m.homeParticipantId,
+    awayParticipantId: m.awayParticipantId,
+    homeScore: null,
+    awayScore: null,
+  }));
+}
+
+// ---------------------------------------------------------------------------
+// Knockout view (shared by the bracket page and the admin)
+// ---------------------------------------------------------------------------
+
+/**
+ * The knockout bracket view derived from the persisted setup, the group-stage
+ * matches, and the saved knockout scores.
+ *
+ *   - `none`                  — no tournament / no group fixtures yet.
+ *   - `groupStageIncomplete`  — group stage in progress.
+ *   - `ready`                 — group stage complete, bracket not yet generated.
+ *   - `bracket`               — the bracket is generated; `bracket` holds the
+ *                               advanced in-memory bracket and `champion` the
+ *                               decided winner (null until the final is played).
+ *
+ * The bracket is recomputed from the qualifiers (final once the group stage is
+ * complete) and the saved knockout scores, so the view always reflects the
+ * latest scores. This helper is pure (no db import) and safe to call from both
+ * server and client components.
+ */
+export type KnockoutView =
+  | { status: "none" }
+  | { status: "groupStageIncomplete"; played: number; total: number }
+  | { status: "ready" }
+  | {
+      status: "bracket";
+      bracket: BracketMatch[];
+      champion: ParticipantId | null;
+    };
+
+export function computeKnockoutView(
+  snapshot: TournamentSetupSnapshot,
+  groupMatches: Match[],
+  knockoutMatches: Match[],
+): KnockoutView {
+  if (!snapshot.tournament || groupMatches.length === 0) {
+    return { status: "none" };
+  }
+
+  const played = groupMatches.filter((m) => m.score != null).length;
+  if (played < groupMatches.length) {
+    return { status: "groupStageIncomplete", played, total: groupMatches.length };
+  }
+
+  const tournament = snapshot.tournament;
+  const scoring = {
+    winPoints: tournament.winPoints,
+    drawPoints: tournament.drawPoints,
+    lossPoints: tournament.lossPoints,
+  };
+  const tiebreakerOrder = tournament.tiebreakerOrder;
+
+  const standingsByGroup = new Map<string, Standing>();
+  for (const group of snapshot.groups) {
+    const groupParticipants = snapshot.participants
+      .filter((p) => p.groupId === group.id)
+      .map((p) => ({
+        id: p.id,
+        name: p.name,
+        drawOrder: p.drawOrder,
+        assignedTeamId: null,
+        groupId: p.groupId,
+      }));
+    standingsByGroup.set(
+      group.id,
+      calculateStandings(groupMatches, groupParticipants, {
+        scoring,
+        tiebreakerOrder,
+        manualResolutions: snapshot.manualResolutions,
+        groupId: group.id,
+      }),
+    );
+  }
+
+  const qualifiers = buildKnockoutQualifiers(
+    snapshot.groups,
+    standingsByGroup,
+    tournament.qualifiersPerGroup,
+  );
+
+  if (knockoutMatches.length === 0) {
+    return { status: "ready" };
+  }
+
+  if (qualifiers.length < 2) {
+    return { status: "ready" };
+  }
+
+  const bracket = generateBracket(qualifiers, tournament.id);
+  const scoreById = new Map<string, MatchScore>();
+  for (const m of knockoutMatches) {
+    if (m.score != null) scoreById.set(m.id, m.score);
+  }
+  const advanced = advanceBracket(applyScores(bracket, scoreById));
+  const champion = getChampion(advanced);
+  return { status: "bracket", bracket: advanced, champion };
 }

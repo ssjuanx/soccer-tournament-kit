@@ -10,18 +10,26 @@
  */
 
 import { validateSetupInput } from "../tournament/draw.ts";
+import { calculateStandings } from "../tournament/standings.ts";
 import type { Match } from "../tournament/types.ts";
 
 import {
   buildGroupStageMatches,
+  buildKnockoutQualifiers,
+  buildKnockoutStageMatches,
+  isGroupStageComplete,
   isReadyForFixtures,
   isStructurallyLocked,
+  hasUnresolvedStandings,
   parseScore,
 } from "./fixtures.ts";
 import {
   clearGroupFixtures,
+  clearKnockoutFixtures,
   getGroupMatches,
+  getKnockoutMatches,
   saveGroupFixtures,
+  saveKnockoutFixtures,
   saveMatchScore,
 } from "./matches.ts";
 import {
@@ -162,6 +170,117 @@ export async function clearFixturesAction(): Promise<MatchActionResult> {
 }
 
 /**
+ * Generates and persists the knockout bracket for the active tournament.
+ *
+ * Allowed only once the group stage is fully played (so the qualifiers are
+ * final) and no group has an unresolved tiebreak. The bracket is seeded from
+ * each group's top `qualifiersPerGroup` standings, with byes to the highest
+ * seeds and same-group round-1 rematch avoidance. Hard-blocks regeneration
+ * while a bracket already exists — clear it first with
+ * `clearKnockoutFixturesAction`. Returns the knockout match list.
+ */
+export async function generateKnockoutFixturesAction(): Promise<MatchActionResult> {
+  try {
+    const setup = await getTournamentSetup();
+    if (!setup.tournament) {
+      return { ok: false, error: "No active tournament found. Generate the setup first." };
+    }
+
+    const existing = await getKnockoutMatches();
+    if (existing.length > 0) {
+      return {
+        ok: false,
+        error: "The knockout bracket has already been generated. Clear it first to regenerate.",
+      };
+    }
+
+    const groupMatches = await getGroupMatches();
+    if (!isGroupStageComplete(groupMatches)) {
+      return {
+        ok: false,
+        error: "The group stage is not complete yet. Play every group match before generating the knockout bracket.",
+      };
+    }
+
+    const scoring = {
+      winPoints: setup.tournament.winPoints,
+      drawPoints: setup.tournament.drawPoints,
+      lossPoints: setup.tournament.lossPoints,
+    };
+    const tiebreakerOrder = setup.tournament.tiebreakerOrder;
+
+    const standingsByGroup = new Map<string, ReturnType<typeof calculateStandings>>();
+    const standingsList: ReturnType<typeof calculateStandings>[] = [];
+    for (const group of setup.groups) {
+      const groupParticipants = setup.participants
+        .filter((p) => p.groupId === group.id)
+        .map((p) => ({
+          id: p.id,
+          name: p.name,
+          drawOrder: p.drawOrder,
+          assignedTeamId: null,
+          groupId: p.groupId,
+        }));
+      const standings = calculateStandings(groupMatches, groupParticipants, {
+        scoring,
+        tiebreakerOrder,
+        manualResolutions: setup.manualResolutions,
+        groupId: group.id,
+      });
+      standingsByGroup.set(group.id, standings);
+      standingsList.push(standings);
+    }
+
+    if (hasUnresolvedStandings(standingsList)) {
+      return {
+        ok: false,
+        error: "Some groups still have unresolved tiebreaks. Resolve them before generating the knockout bracket.",
+      };
+    }
+
+    const qualifiers = buildKnockoutQualifiers(
+      setup.groups,
+      standingsByGroup,
+      setup.tournament.qualifiersPerGroup,
+    );
+    if (qualifiers.length < 2) {
+      return {
+        ok: false,
+        error: "Not enough qualifiers to build a knockout bracket (need at least 2).",
+      };
+    }
+
+    const rows = buildKnockoutStageMatches(qualifiers, setup.tournament.id);
+    await saveKnockoutFixtures(rows);
+
+    const matches = await getKnockoutMatches();
+    return { ok: true, matches };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Failed to generate the knockout bracket.",
+    };
+  }
+}
+
+/**
+ * Clears the knockout bracket (and its scores) for the active tournament.
+ * The group stage is untouched. Use this to regenerate the bracket after a
+ * rules change. Returns an empty knockout match list.
+ */
+export async function clearKnockoutFixturesAction(): Promise<MatchActionResult> {
+  try {
+    await clearKnockoutFixtures();
+    return { ok: true, matches: [] };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Failed to clear the knockout bracket.",
+    };
+  }
+}
+
+/**
  * Persists a single match's score from raw string inputs.
  *
  * Both blank -> clears the score. Invalid scores (partial, non-integer,
@@ -186,6 +305,39 @@ export async function saveMatchScoreAction(
   try {
     await saveMatchScore(matchId, score);
     return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Failed to save the score.",
+    };
+  }
+}
+
+/**
+ * Persists a single knockout match's score and returns the refreshed knockout
+ * match list, so the admin UI can recompute the advanced bracket (the winner
+ * feeds the next round) without a separate fetch. Same score rules as
+ * `saveMatchScoreAction`.
+ */
+export async function saveKnockoutScoreAction(
+  matchId: string,
+  homeRaw: string,
+  awayRaw: string,
+): Promise<MatchActionResult> {
+  let score;
+  try {
+    score = parseScore(homeRaw, awayRaw);
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Invalid score.",
+    };
+  }
+
+  try {
+    await saveMatchScore(matchId, score);
+    const matches = await getKnockoutMatches();
+    return { ok: true, matches };
   } catch (error) {
     return {
       ok: false,
@@ -225,29 +377,38 @@ export async function saveTournamentMetadataAction(
 }
 
 /**
- * Persists the active tournament's scoring rules and tiebreaker order.
+ * Persists the active tournament's scoring rules, tiebreaker order, and
+ * qualifiers-per-group setting.
  *
- * Accepts the raw string scoring inputs from the admin form and the
- * tiebreaker order chosen in the UI. Scoring values are parsed and validated
- * (integers, blanks fall back to defaults) before persisting; the tiebreaker
- * order is normalized (unknown/duplicate keys dropped). Rules are editable
- * even after fixtures are locked.
+ * Accepts the raw string scoring inputs from the admin form, the tiebreaker
+ * order chosen in the UI, and the qualifiers-per-group count. Scoring values are
+ * parsed and validated (integers, blanks fall back to defaults); the tiebreaker
+ * order is normalized (unknown/duplicate keys dropped); the qualifiers count is
+ * validated as a positive integer (blank falls back to the default of 2). Rules
+ * are editable even after fixtures are locked.
  */
 export async function saveTournamentRulesAction(
   winRaw: string,
   drawRaw: string,
   lossRaw: string,
   tiebreakerOrder: TiebreakerKey[],
+  qualifiersPerGroupRaw: string,
 ): Promise<ActionResult> {
   const parsed = parseScoringRules(winRaw, drawRaw, lossRaw);
   if (!parsed.ok) {
     return { ok: false, error: parsed.message };
   }
 
+  const qualifiersPerGroup = parseQualifiersPerGroup(qualifiersPerGroupRaw);
+  if (qualifiersPerGroup == null) {
+    return { ok: false, error: "Qualifiers per group must be a whole number of 1 or more." };
+  }
+
   try {
     await saveTournamentRules(
       parsed.config,
       normalizeTiebreakerOrder(tiebreakerOrder),
+      qualifiersPerGroup,
     );
     return { ok: true };
   } catch (error) {
@@ -256,6 +417,20 @@ export async function saveTournamentRulesAction(
       error: error instanceof Error ? error.message : "Failed to save tournament rules.",
     };
   }
+}
+
+/**
+ * Parses the qualifiers-per-group form input into a positive integer.
+ *
+ * A blank value falls back to the default of 2. Non-integer or non-positive
+ * values yield `null` (rejected by the caller with a friendly message).
+ */
+function parseQualifiersPerGroup(raw: string): number | null {
+  const trimmed = raw.trim();
+  if (trimmed === "") return 2;
+  const n = Number(trimmed);
+  if (!Number.isInteger(n) || n < 1) return null;
+  return n;
 }
 
 /**

@@ -1,33 +1,33 @@
 import { getTournamentSetup } from "@/lib/db/tournaments";
-import { getGroupMatches } from "@/lib/db/matches";
+import { getGroupMatches, getKnockoutMatches } from "@/lib/db/matches";
+import { computeKnockoutView } from "@/lib/db/fixtures";
+import { BracketView } from "./bracket-view";
 
 export const metadata = { title: "Bracket" };
 
 // Always read the latest persisted setup and fixtures at request time (never
-// prerendered), so the bracket status reflects the current group-stage progress.
+// prerendered), so the bracket reflects the current knockout progress.
 export const dynamic = "force-dynamic";
 
 export default async function BracketPage() {
-  const [setup, matches] = await Promise.all([
+  const [setup, groupMatches, knockoutMatches] = await Promise.all([
     getTournamentSetup(),
     getGroupMatches(),
+    getKnockoutMatches(),
   ]);
 
-  const hasTournament = setup.tournament != null;
-  const playedCount = matches.filter((m) => m.score != null).length;
+  const view = computeKnockoutView(setup, groupMatches, knockoutMatches);
 
-  let message: string;
-  if (!hasTournament) {
+  let message: string | null = null;
+  if (view.status === "none") {
+    message = setup.tournament
+      ? "Group-stage fixtures haven't been generated yet. The knockout bracket will appear here once the group stage is complete."
+      : "No tournament has been set up yet. The knockout bracket will appear here once the group stage is complete.";
+  } else if (view.status === "groupStageIncomplete") {
+    message = `The group stage is in progress (${view.played} of ${view.total} matches played). The knockout bracket will appear here once the group stage is complete.`;
+  } else if (view.status === "ready") {
     message =
-      "No tournament has been set up yet. The knockout bracket will appear here once the group stage is complete.";
-  } else if (matches.length === 0) {
-    message =
-      "Group-stage fixtures haven't been generated yet. The knockout bracket will appear here once the group stage is complete.";
-  } else if (playedCount < matches.length) {
-    message = `The group stage is in progress (${playedCount} of ${matches.length} matches played). The knockout bracket will appear here once the group stage is complete.`;
-  } else {
-    message =
-      "The group stage is complete. The knockout bracket will be generated next.";
+      "The group stage is complete. The knockout bracket will appear here once the administrator generates it.";
   }
 
   return (
@@ -35,12 +35,22 @@ export default async function BracketPage() {
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Bracket</h1>
         <p className="mt-1 text-slate-600">
-          The knockout bracket from the round of 16 to the final.
+          The single-elimination knockout bracket, from the first round to the
+          final.
         </p>
       </div>
-      <p className="rounded-lg border border-slate-200 bg-white p-5 text-slate-600">
-        {message}
-      </p>
+
+      {view.status === "bracket" ? (
+        <BracketView
+          bracket={view.bracket}
+          champion={view.champion}
+          participants={setup.participants}
+        />
+      ) : (
+        <p className="rounded-lg border border-slate-200 bg-white p-5 text-slate-600">
+          {message}
+        </p>
+      )}
     </div>
   );
 }
