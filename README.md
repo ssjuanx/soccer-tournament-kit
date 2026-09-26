@@ -7,8 +7,9 @@ read-only website to follow the group stage and knockout bracket.
 ## Status
 
 The app supports tournament setup, balanced round-robin groups, score entry,
-standings, and independent Championship and Consolation brackets. Data is
-persisted in Neon Postgres and the public pages are read-only.
+standings, independent Championship and Consolation brackets, and editable
+public rule cards. Data is persisted in Neon Postgres and the public pages are
+read-only.
 
 ## Planned features
 
@@ -16,10 +17,10 @@ persisted in Neon Postgres and the public pages are read-only.
   automatically computed standings with points and tiebreakers.
 - **Knockout bracket** &mdash; a single-elimination bracket built from the
   qualified teams, from the round of 16 through the final.
-- **Public site** &mdash; read-only views for standings, matches, and the
-  bracket.
+- **Public site** &mdash; read-only views for standings, matches, brackets, and
+  tournament rules.
 - **Admin area** &mdash; a single administrator manages participants, teams,
-  and match scores.
+  match scores, and public rules.
 
 ## Tech stack
 
@@ -66,10 +67,11 @@ npm start
 │   ├── layout.tsx      # Root layout: header, navigation, footer
 │   ├── globals.css     # Tailwind CSS entry point
 │   ├── page.tsx        # Landing page
-│   ├── standings/      # Group-stage standings (placeholder)
-│   ├── matches/        # Match list and scores (placeholder)
-│   ├── bracket/        # Knockout bracket (placeholder)
-│   └── admin/          # Administrator area (placeholder)
+│   ├── standings/      # Group-stage standings
+│   ├── matches/        # Numbered match order and scores
+│   ├── bracket/        # Championship and Consolation brackets
+│   ├── rules/          # Public tournament rules
+│   └── admin/          # Administrator area
 ├── next.config.ts      # Next.js configuration
 ├── postcss.config.mjs  # PostCSS configuration (Tailwind)
 ├── tsconfig.json       # TypeScript configuration

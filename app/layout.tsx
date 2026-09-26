@@ -15,6 +15,7 @@ const navLinks = [
   { href: "/standings", label: "Standings" },
   { href: "/matches", label: "Matches" },
   { href: "/bracket", label: "Bracket" },
+  { href: "/rules", label: "Rules" },
   // Do not prefetch the protected route: a background 401 can trigger the
   // browser's Basic Auth prompt before the visitor chooses Admin.
   { href: "/admin", label: "Admin", prefetch: false },

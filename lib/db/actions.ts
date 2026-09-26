@@ -10,6 +10,7 @@
  */
 
 import { validateSetupInput } from "../tournament/draw.ts";
+import { headers } from "next/headers";
 import { calculateStandings } from "../tournament/standings.ts";
 import type { Match } from "../tournament/types.ts";
 
@@ -47,6 +48,13 @@ import {
   normalizeTiebreakerOrder,
   parseScoringRules,
 } from "./setup.ts";
+import {
+  createTournamentRule,
+  deleteTournamentRule,
+  getTournamentRules,
+  updateTournamentRule,
+  type TournamentRule,
+} from "./rules.ts";
 import type {
   BracketKind,
   GroupId,
@@ -55,6 +63,100 @@ import type {
 } from "../tournament/types.ts";
 
 export type ActionResult = { ok: true } | { ok: false; error: string };
+
+export type RulesActionResult =
+  | { ok: true; rules: TournamentRule[] }
+  | { ok: false; error: string };
+
+function normalizeRuleInput(
+  title: string,
+  body: string,
+): { ok: true; title: string; body: string } | { ok: false; error: string } {
+  if (typeof title !== "string" || typeof body !== "string") {
+    return { ok: false, error: "Invalid rule input." };
+  }
+  const normalizedTitle = title.trim();
+  const normalizedBody = body.trim();
+  if (!normalizedTitle || !normalizedBody) {
+    return { ok: false, error: "A rule needs both a title and description." };
+  }
+  if (normalizedTitle.length > 120 || normalizedBody.length > 2000) {
+    return { ok: false, error: "Keep the title under 120 characters and the description under 2,000." };
+  }
+  return { ok: true, title: normalizedTitle, body: normalizedBody };
+}
+
+async function isAdminActionAuthorized(): Promise<boolean> {
+  const password = process.env.ADMIN_PASSWORD;
+  if (!password) return process.env.NODE_ENV === "development";
+  const authorization = (await headers()).get("authorization");
+  const expected = `Basic ${Buffer.from(`admin:${password}`).toString("base64")}`;
+  return authorization === expected;
+}
+
+export async function createTournamentRuleAction(
+  title: string,
+  body: string,
+): Promise<RulesActionResult> {
+  if (!(await isAdminActionAuthorized())) {
+    return { ok: false, error: "Administrator authentication required." };
+  }
+  const input = normalizeRuleInput(title, body);
+  if (!input.ok) return input;
+  try {
+    await createTournamentRule(input.title, input.body);
+    return { ok: true, rules: await getTournamentRules() };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Failed to create the rule.",
+    };
+  }
+}
+
+export async function updateTournamentRuleAction(
+  id: string,
+  title: string,
+  body: string,
+): Promise<RulesActionResult> {
+  if (!(await isAdminActionAuthorized())) {
+    return { ok: false, error: "Administrator authentication required." };
+  }
+  if (typeof id !== "string" || id === "") {
+    return { ok: false, error: "Invalid rule." };
+  }
+  const input = normalizeRuleInput(title, body);
+  if (!input.ok) return input;
+  try {
+    await updateTournamentRule(id, input.title, input.body);
+    return { ok: true, rules: await getTournamentRules() };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Failed to update the rule.",
+    };
+  }
+}
+
+export async function deleteTournamentRuleAction(
+  id: string,
+): Promise<RulesActionResult> {
+  if (!(await isAdminActionAuthorized())) {
+    return { ok: false, error: "Administrator authentication required." };
+  }
+  if (typeof id !== "string" || id === "") {
+    return { ok: false, error: "Invalid rule." };
+  }
+  try {
+    await deleteTournamentRule(id);
+    return { ok: true, rules: await getTournamentRules() };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Failed to delete the rule.",
+    };
+  }
+}
 
 /**
  * Result of an action that also returns the updated group-stage matches, so the

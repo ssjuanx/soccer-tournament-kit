@@ -43,6 +43,13 @@
       "when": 1790375680453,
       "tag": "0005_cynical_plazm",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1790389230850,
+      "tag": "0006_tournament_rules",
+      "breakpoints": true
     }
   ]
 }

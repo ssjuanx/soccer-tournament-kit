@@ -1,6 +1,8 @@
 import AdminSetup from "./admin-setup";
+import AdminRules from "./admin-rules";
 import { getTournamentSetup } from "@/lib/db/tournaments";
 import { getGroupMatches, getKnockoutMatches } from "@/lib/db/matches";
+import { getTournamentRules } from "@/lib/db/rules";
 
 export const metadata = { title: "Admin" };
 
@@ -14,11 +16,13 @@ export default async function AdminPage() {
     initialMatches,
     initialChampionshipMatches,
     initialConsolationMatches,
+    initialRules,
   ] = await Promise.all([
     getTournamentSetup(),
     getGroupMatches(),
     getKnockoutMatches("championship"),
     getKnockoutMatches("consolation"),
+    getTournamentRules(),
   ]);
   return (
     <div className="space-y-6">
@@ -33,6 +37,10 @@ export default async function AdminPage() {
         initialMatches={initialMatches}
         initialChampionshipMatches={initialChampionshipMatches}
         initialConsolationMatches={initialConsolationMatches}
+      />
+      <AdminRules
+        initialRules={initialRules}
+        tournamentReady={initialSetup.tournament != null}
       />
     </div>
   );

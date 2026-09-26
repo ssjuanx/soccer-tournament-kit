@@ -28,6 +28,12 @@ import {
 } from "../lib/db/matches.ts";
 import { tournaments } from "../lib/db/schema.ts";
 import {
+  createTournamentRule,
+  deleteTournamentRule,
+  getTournamentRules,
+  updateTournamentRule,
+} from "../lib/db/rules.ts";
+import {
   ACTIVE_TOURNAMENT_ID,
   getTournamentSetup,
   saveParticipants,
@@ -136,6 +142,20 @@ async function main() {
       description: "Temporary end-to-end rehearsal",
     });
 
+    await createTournamentRule("Match format", "Play every group opponent once.");
+    await createTournamentRule("Temporary rule", "This rule tests deletion.");
+    let rules = await getTournamentRules();
+    assert.equal(rules.length, 2);
+    await updateTournamentRule(
+      rules[0].id,
+      "Match format",
+      "Updated: play every group opponent once.",
+    );
+    await deleteTournamentRule(rules[1].id);
+    rules = await getTournamentRules();
+    assert.equal(rules.length, 1);
+    assert.match(rules[0].body, /^Updated:/);
+
     const entries: Record<number, { name: string; team: string }> = {};
     for (let drawOrder = 1; drawOrder <= 18; drawOrder++) {
       entries[drawOrder] = {
@@ -202,6 +222,7 @@ async function main() {
       "Championship winner",
       "Consolation winner",
     ]);
+    await verifyPage("/rules", ["Rule 1", "Match format", "Updated:"]);
 
     console.log("DRESS REHEARSAL OK");
     console.log("  participants: 18");
@@ -209,7 +230,8 @@ async function main() {
     console.log("  group matches: 32/32 completed");
     console.log("  championship: 8 players, winner decided");
     console.log("  consolation: 10 players, 6 byes, winner decided");
-    if (BASE_URL) console.log("  public pages: verified");
+    console.log("  rules: create, edit, and delete verified");
+    if (BASE_URL) console.log("  public pages, including rules: verified");
   } finally {
     if (ownsActiveTournament) {
       const current = await getTournamentSetup();
