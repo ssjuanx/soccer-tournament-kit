@@ -68,6 +68,14 @@ function isBracketKind(value: unknown): value is BracketKind {
   return value === "championship" || value === "consolation";
 }
 
+async function hasAnyKnockoutFixtures(): Promise<boolean> {
+  const [championship, consolation] = await Promise.all([
+    getKnockoutMatches("championship"),
+    getKnockoutMatches("consolation"),
+  ]);
+  return championship.length > 0 || consolation.length > 0;
+}
+
 /**
  * Generates and persists the tournament setup (participant + group counts and
  * the derived groups). Participants are not touched here. Validates the raw
@@ -336,6 +344,13 @@ export async function saveMatchScoreAction(
   }
 
   try {
+    if (await hasAnyKnockoutFixtures()) {
+      return {
+        ok: false,
+        error:
+          "Clear both knockout brackets before changing a group-stage score.",
+      };
+    }
     await saveMatchScore(matchId, score);
     return { ok: true };
   } catch (error) {
@@ -429,7 +444,8 @@ export async function saveTournamentMetadataAction(
  * parsed and validated (integers, blanks fall back to defaults); the tiebreaker
  * order is normalized (unknown/duplicate keys dropped); the qualifiers count is
  * validated as a positive integer (blank falls back to the default of 2). Rules
- * are editable even after fixtures are locked.
+ * stay editable after group fixtures are locked, but are frozen once either
+ * knockout bracket exists because changing them could change its participants.
  */
 export async function saveTournamentRulesAction(
   winRaw: string,
@@ -449,6 +465,12 @@ export async function saveTournamentRulesAction(
   }
 
   try {
+    if (await hasAnyKnockoutFixtures()) {
+      return {
+        ok: false,
+        error: "Clear both knockout brackets before changing tournament rules.",
+      };
+    }
     await saveTournamentRules(
       parsed.config,
       normalizeTiebreakerOrder(tiebreakerOrder),
@@ -498,6 +520,13 @@ export async function saveManualTiebreakResolutionAction(
     return { ok: false, error: "Participant order must be a list." };
   }
   try {
+    if (await hasAnyKnockoutFixtures()) {
+      return {
+        ok: false,
+        error:
+          "Clear both knockout brackets before changing a manual tiebreak.",
+      };
+    }
     await saveManualTiebreakResolution(groupId, cohortKey, participantOrder);
     return { ok: true };
   } catch (error) {

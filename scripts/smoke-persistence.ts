@@ -30,6 +30,14 @@ import {
 } from "../lib/db/matches.ts";
 
 async function main() {
+  if (
+    process.env.CONFIRM_DESTRUCTIVE_SMOKE !== "DELETE_ACTIVE_TOURNAMENT"
+  ) {
+    throw new Error(
+      "Refusing to run: this legacy smoke test deletes the active tournament. Run it only on an isolated Neon branch and set CONFIRM_DESTRUCTIVE_SMOKE=DELETE_ACTIVE_TOURNAMENT explicitly.",
+    );
+  }
+
   // Clean slate in case a previous run left data.
   await db.delete(tournaments).where(eq(tournaments.id, "active"));
 

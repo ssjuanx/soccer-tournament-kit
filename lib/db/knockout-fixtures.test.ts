@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { calculateStandings } from "../tournament/standings.ts";
+import { getGroupSizes } from "../tournament/groups.ts";
 import type { Match, Participant } from "../tournament/types.ts";
 import {
   buildConsolationQualifiers,
@@ -223,10 +224,9 @@ test("buildKnockoutStageMatches: consolation has independent ids and kind", () =
   assert.ok(rows.every((row) => row.id.startsWith("active:consolation:ko:r")));
 });
 
-test("Los pibes: 12-16 players produce 4-8 consolation entries with correct byes", () => {
-  for (let totalPlayers = 12; totalPlayers <= 16; totalPlayers++) {
-    const groupSizes = [3, 3, 3, 3];
-    for (let i = 0; i < totalPlayers - 12; i++) groupSizes[i]++;
+test("Los pibes: 12-18 players produce correct consolation fields and byes", () => {
+  for (let totalPlayers = 12; totalPlayers <= 18; totalPlayers++) {
+    const groupSizes = getGroupSizes(totalPlayers, 4);
 
     const groups = groupSizes.map((_, index) => ({
       id: `g${index}`,
@@ -270,7 +270,8 @@ test("Los pibes: 12-16 players produce 4-8 consolation entries with correct byes
       TID,
       "consolation",
     );
-    const bracketSize = totalPlayers - 8 <= 4 ? 4 : 8;
+    let bracketSize = 1;
+    while (bracketSize < consolation.length) bracketSize *= 2;
     assert.equal(rows.length, bracketSize - 1);
 
     const firstRound = rows.filter((row) => row.id.includes(":ko:r0:"));
@@ -279,6 +280,18 @@ test("Los pibes: 12-16 players produce 4-8 consolation entries with correct byes
         (row.homeParticipantId == null) !== (row.awayParticipantId == null),
     );
     assert.equal(byes.length, bracketSize - consolation.length);
+
+    const groupByParticipant = new Map(
+      participants.map((participant) => [participant.id, participant.groupId]),
+    );
+    for (const row of firstRound) {
+      if (row.homeParticipantId && row.awayParticipantId) {
+        assert.notEqual(
+          groupByParticipant.get(row.homeParticipantId),
+          groupByParticipant.get(row.awayParticipantId),
+        );
+      }
+    }
   }
 });
 

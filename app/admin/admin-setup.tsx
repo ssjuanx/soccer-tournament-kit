@@ -1252,6 +1252,9 @@ function RulesSection({
             onChange={(e) => onQualifiersChange(e.target.value)}
             className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
           />
+          <span className="mt-1 block text-xs text-slate-500">
+            Keep this at 2 for Los pibes.
+          </span>
         </label>
       </div>
 
