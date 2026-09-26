@@ -132,6 +132,7 @@ async function main() {
   }
 
   let ownsActiveTournament = false;
+  const ownedRuleIds: string[] = [];
   try {
     await saveTournamentSetup({ participantCount: 18, groupCount: 4 });
     ownsActiveTournament = true;
@@ -142,17 +143,32 @@ async function main() {
       description: "Temporary end-to-end rehearsal",
     });
 
-    await createTournamentRule("Match format", "Play every group opponent once.");
-    await createTournamentRule("Temporary rule", "This rule tests deletion.");
-    let rules = await getTournamentRules();
+    ownedRuleIds.push(
+      await createTournamentRule(
+        "__DRESS_REHEARSAL_MATCH_FORMAT__",
+        "Play every group opponent once.",
+      ),
+    );
+    ownedRuleIds.push(
+      await createTournamentRule(
+        "__DRESS_REHEARSAL_DELETE__",
+        "This rule tests deletion.",
+      ),
+    );
+    let rules = (await getTournamentRules()).filter((rule) =>
+      ownedRuleIds.includes(rule.id),
+    );
     assert.equal(rules.length, 2);
     await updateTournamentRule(
       rules[0].id,
-      "Match format",
+      "__DRESS_REHEARSAL_MATCH_FORMAT__",
       "Updated: play every group opponent once.",
     );
     await deleteTournamentRule(rules[1].id);
-    rules = await getTournamentRules();
+    ownedRuleIds.splice(ownedRuleIds.indexOf(rules[1].id), 1);
+    rules = (await getTournamentRules()).filter((rule) =>
+      ownedRuleIds.includes(rule.id),
+    );
     assert.equal(rules.length, 1);
     assert.match(rules[0].body, /^Updated:/);
 
@@ -237,7 +253,7 @@ async function main() {
       "Championship winner",
       "Consolation winner",
     ]);
-    await verifyPage("/rules", ["Rule 1", "Match format", "Updated:"]);
+    await verifyPage("/rules", ["__DRESS_REHEARSAL_MATCH_FORMAT__", "Updated:"]);
 
     console.log("DRESS REHEARSAL OK");
     console.log("  participants: 18");
@@ -248,6 +264,9 @@ async function main() {
     console.log("  rules: create, edit, and delete verified");
     if (BASE_URL) console.log("  public pages, including rules: verified");
   } finally {
+    for (const ruleId of ownedRuleIds) {
+      await deleteTournamentRule(ruleId);
+    }
     if (ownsActiveTournament) {
       const current = await getTournamentSetup();
       if (current.tournament?.name !== REHEARSAL_NAME) {

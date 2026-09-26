@@ -38,10 +38,7 @@ export default async function AdminPage() {
         initialChampionshipMatches={initialChampionshipMatches}
         initialConsolationMatches={initialConsolationMatches}
       />
-      <AdminRules
-        initialRules={initialRules}
-        tournamentReady={initialSetup.tournament != null}
-      />
+      <AdminRules initialRules={initialRules} />
     </div>
   );
 }

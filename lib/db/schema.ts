@@ -193,21 +193,12 @@ export const manualTiebreakResolutions = pgTable(
   ],
 );
 
-// Public tournament rules, edited by the administrator and rendered as
-// individual cards on /rules. Rules belong to the active tournament so a
-// future tournament does not inherit event-specific copy accidentally.
-export const tournamentRules = pgTable(
-  "tournament_rules",
-  {
-    id: text("id").primaryKey(),
-    tournamentId: text("tournament_id")
-      .notNull()
-      .references(() => tournaments.id, { onDelete: "cascade" }),
-    title: text("title").notNull(),
-    body: text("body").notNull(),
-    sortOrder: integer("sort_order").notNull(),
-  },
-  (table) => [
-    index("tournament_rules_tournament_id_idx").on(table.tournamentId),
-  ],
-);
+// Public rule cards are global event content rather than tournament-owned
+// records. They can be created before the tournament setup exists and survive
+// replacing or clearing that setup.
+export const tournamentRules = pgTable("tournament_rules", {
+  id: text("id").primaryKey(),
+  title: text("title").notNull(),
+  body: text("body").notNull(),
+  sortOrder: integer("sort_order").notNull(),
+});

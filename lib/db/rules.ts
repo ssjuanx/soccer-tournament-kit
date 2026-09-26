@@ -2,11 +2,10 @@
 
 import { randomUUID } from "node:crypto";
 
-import { and, asc, eq, max } from "drizzle-orm";
+import { asc, eq, max } from "drizzle-orm";
 
 import { db } from "./client.ts";
 import { tournamentRules } from "./schema.ts";
-import { ACTIVE_TOURNAMENT_ID } from "./tournaments.ts";
 
 export interface TournamentRule {
   id: string;
@@ -24,26 +23,25 @@ export async function getTournamentRules(): Promise<TournamentRule[]> {
       sortOrder: tournamentRules.sortOrder,
     })
     .from(tournamentRules)
-    .where(eq(tournamentRules.tournamentId, ACTIVE_TOURNAMENT_ID))
     .orderBy(asc(tournamentRules.sortOrder), asc(tournamentRules.id));
 }
 
 export async function createTournamentRule(
   title: string,
   body: string,
-): Promise<void> {
+): Promise<string> {
   const [{ highestOrder }] = await db
     .select({ highestOrder: max(tournamentRules.sortOrder) })
-    .from(tournamentRules)
-    .where(eq(tournamentRules.tournamentId, ACTIVE_TOURNAMENT_ID));
+    .from(tournamentRules);
 
+  const id = `rule:${randomUUID()}`;
   await db.insert(tournamentRules).values({
-    id: `${ACTIVE_TOURNAMENT_ID}:rule:${randomUUID()}`,
-    tournamentId: ACTIVE_TOURNAMENT_ID,
+    id,
     title,
     body,
     sortOrder: (highestOrder ?? 0) + 1,
   });
+  return id;
 }
 
 export async function updateTournamentRule(
@@ -54,21 +52,11 @@ export async function updateTournamentRule(
   await db
     .update(tournamentRules)
     .set({ title, body })
-    .where(
-      and(
-        eq(tournamentRules.id, id),
-        eq(tournamentRules.tournamentId, ACTIVE_TOURNAMENT_ID),
-      ),
-    );
+    .where(eq(tournamentRules.id, id));
 }
 
 export async function deleteTournamentRule(id: string): Promise<void> {
   await db
     .delete(tournamentRules)
-    .where(
-      and(
-        eq(tournamentRules.id, id),
-        eq(tournamentRules.tournamentId, ACTIVE_TOURNAMENT_ID),
-      ),
-    );
+    .where(eq(tournamentRules.id, id));
 }

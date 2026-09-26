@@ -50,6 +50,13 @@
       "when": 1790389230850,
       "tag": "0006_tournament_rules",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1790399181954,
+      "tag": "0007_global_rules",
+      "breakpoints": true
     }
   ]
 }

@@ -22,10 +22,8 @@ function draftsFrom(rules: TournamentRule[]): Record<string, RuleDraft> {
 
 export default function AdminRules({
   initialRules,
-  tournamentReady,
 }: {
   initialRules: TournamentRule[];
-  tournamentReady: boolean;
 }) {
   const [rules, setRules] = useState(initialRules);
   const [drafts, setDrafts] = useState(() => draftsFrom(initialRules));
@@ -94,37 +92,29 @@ export default function AdminRules({
         </p>
       </div>
 
-      {!tournamentReady ? (
-        <p className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">
-          Generate the tournament setup before adding public rules.
-        </p>
-      ) : null}
-
       {message ? (
         <p className="rounded-md bg-slate-100 px-3 py-2 text-sm text-slate-700">
           {message}
         </p>
       ) : null}
 
-      {tournamentReady ? (
-        <div className="rounded-lg border border-dashed border-slate-300 bg-white p-4">
-          <h3 className="text-sm font-semibold text-slate-900">Add a rule</h3>
-          <RuleFields
-            draft={newRule}
-            onChange={(field, value) =>
-              setNewRule((current) => ({ ...current, [field]: value }))
-            }
-          />
-          <button
-            type="button"
-            onClick={handleCreate}
-            disabled={busyId !== null}
-            className="mt-3 rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {busyId === "new" ? "Adding…" : "Add rule"}
-          </button>
-        </div>
-      ) : null}
+      <div className="rounded-lg border border-dashed border-slate-300 bg-white p-4">
+        <h3 className="text-sm font-semibold text-slate-900">Add a rule</h3>
+        <RuleFields
+          draft={newRule}
+          onChange={(field, value) =>
+            setNewRule((current) => ({ ...current, [field]: value }))
+          }
+        />
+        <button
+          type="button"
+          onClick={handleCreate}
+          disabled={busyId !== null}
+          className="mt-3 rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {busyId === "new" ? "Adding…" : "Add rule"}
+        </button>
+      </div>
 
       <div className="grid gap-4 sm:grid-cols-2">
         {rules.map((rule, index) => {
