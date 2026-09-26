@@ -365,8 +365,10 @@ export function generateBracket(
  *
  * - A played match (score set): the side with more goals. Equal scores yield no
  *   winner (a knockout match must be decided; advancement waits).
- * - An unplayed match with one bye side: the real side advances automatically.
+ * - An unplayed first-round match with one bye side: the real side advances
+ *   automatically.
  * - An unplayed match with both sides known / both TBD: no winner yet.
+ * - A later-round empty slot is always TBD, never a bye.
  */
 export function winnerOf(match: BracketMatch): BracketSlot | null {
   if (match.score != null) {
@@ -374,11 +376,21 @@ export function winnerOf(match: BracketMatch): BracketSlot | null {
     if (match.score.away > match.score.home) return match.away;
     return null; // draw: not decided
   }
-  // Bye: exactly one side is a real participant.
-  if (match.home.participantId != null && match.away.participantId == null) {
+  // Byes exist only in the seeded first round. In later rounds a null side
+  // means its feeder match has not been decided yet and must never trigger an
+  // automatic advance.
+  if (
+    match.roundIndex === 0 &&
+    match.home.participantId != null &&
+    match.away.participantId == null
+  ) {
     return match.home;
   }
-  if (match.away.participantId != null && match.home.participantId == null) {
+  if (
+    match.roundIndex === 0 &&
+    match.away.participantId != null &&
+    match.home.participantId == null
+  ) {
     return match.away;
   }
   return null;

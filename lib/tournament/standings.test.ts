@@ -1,7 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { calculateStandings, POINTS } from "./standings.ts";
+import {
+  calculateStandings,
+  calculateTournamentTotals,
+  POINTS,
+} from "./standings.ts";
 import type { Match, Participant, Standing } from "./types.ts";
 
 function participant(id: string, drawOrder: number): Participant {
@@ -30,6 +34,70 @@ test("POINTS: standard soccer scoring (3/1/0)", () => {
   assert.equal(POINTS.win, 3);
   assert.equal(POINTS.draw, 1);
   assert.equal(POINTS.loss, 0);
+});
+
+test("calculateTournamentTotals: combines group and knockout statistics", () => {
+  const participants = [
+    participant("a", 1),
+    participant("b", 2),
+    participant("c", 3),
+  ];
+  const group = groupMatch("A", "a", "b", 2, 1);
+  const knockout: Match = {
+    id: "active:ko:r0:m0",
+    stage: "knockout",
+    groupId: null,
+    knockoutRound: "semi_final",
+    homeParticipantId: "a",
+    awayParticipantId: "c",
+    score: { home: 0, away: 3 },
+  };
+
+  const totals = calculateTournamentTotals([group, knockout], participants);
+  const row = (id: string) => totals.find((item) => item.participantId === id)!;
+
+  assert.deepEqual(row("a"), {
+    participantId: "a",
+    played: 2,
+    wins: 1,
+    draws: 0,
+    losses: 1,
+    goalsFor: 2,
+    goalsAgainst: 4,
+    goalDifference: -2,
+  });
+  assert.equal(row("b").played, 1);
+  assert.equal(row("c").wins, 1);
+});
+
+test("calculateTournamentTotals: ignores byes, TBD matches, and unplayed matches", () => {
+  const participants = [participant("a", 1), participant("b", 2)];
+  const matches: Match[] = [
+    {
+      id: "bye",
+      stage: "knockout",
+      groupId: null,
+      knockoutRound: "quarter_final",
+      homeParticipantId: "a",
+      awayParticipantId: null,
+      score: null,
+    },
+    {
+      id: "unplayed",
+      stage: "group",
+      groupId: "A",
+      knockoutRound: null,
+      homeParticipantId: "a",
+      awayParticipantId: "b",
+      score: null,
+    },
+  ];
+
+  assert.ok(
+    calculateTournamentTotals(matches, participants).every(
+      (row) => row.played === 0 && row.goalsFor === 0,
+    ),
+  );
 });
 
 test("calculateStandings: win/draw/loss and goal totals", () => {

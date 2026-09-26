@@ -212,6 +212,21 @@ async function main() {
       buildKnockoutStageMatches(consolation, ACTIVE_TOURNAMENT_ID, "consolation"),
     );
 
+    const unplayedConsolation = computeKnockoutView(
+      setup,
+      groupMatches,
+      await getKnockoutMatches("consolation"),
+      "consolation",
+    );
+    assert.equal(unplayedConsolation.status, "bracket");
+    if (unplayedConsolation.status === "bracket") {
+      assert.equal(
+        unplayedConsolation.champion,
+        null,
+        "byes must not create a champion before later rounds are played",
+      );
+    }
+
     const championshipWinner = await playBracket("championship");
     const consolationWinner = await playBracket("consolation");
     assert.notEqual(championshipWinner, consolationWinner);

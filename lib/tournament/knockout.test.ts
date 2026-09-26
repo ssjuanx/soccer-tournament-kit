@@ -323,6 +323,40 @@ test("advanceBracket: bye auto-advances the real side without a score", () => {
   assert.equal(final.home.participantId, "A1");
 });
 
+test("advanceBracket: a bye winner waits for its unresolved later-round rival", () => {
+  const qualifiers = [
+    qualifier("A1", "A", 1),
+    qualifier("B1", "B", 1),
+    qualifier("C1", "C", 1),
+    qualifier("D1", "D", 1),
+    qualifier("E1", "E", 1),
+  ];
+  const advanced = advanceBracket(generateBracket(qualifiers, TOURNAMENT_ID));
+  const final = advanced.find((m) => m.knockoutRound === "final")!;
+
+  assert.equal(final.home.participantId, null);
+  assert.equal(final.away.participantId, null);
+  assert.equal(getChampion(advanced), null);
+});
+
+test("advanceBracket: many first-round byes never create a champion", () => {
+  const qualifiers = Array.from({ length: 10 }, (_, index) =>
+    qualifier(`p${index + 1}`, `G${index + 1}`, index < 4 ? 3 : 4),
+  );
+  const advanced = advanceBracket(generateBracket(qualifiers, TOURNAMENT_ID));
+
+  assert.equal(getChampion(advanced), null);
+  assert.ok(
+    advanced.some(
+      (match) =>
+        match.roundIndex > 0 &&
+        (match.home.participantId == null) !==
+          (match.away.participantId == null),
+    ),
+    "a later-round participant should wait for a TBD rival",
+  );
+});
+
 test("advanceBracket: winner of a played match feeds the next round", () => {
   const qualifiers = [
     qualifier("A1", "A", 1),

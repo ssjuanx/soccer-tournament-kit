@@ -217,19 +217,19 @@ export function KnockoutSection({
         </div>
       ) : null}
 
-      <div className="grid gap-4 lg:grid-cols-3 xl:grid-cols-4">
+      <div className="grid items-stretch gap-5 md:grid-cols-2 xl:grid-cols-4">
         {roundIndices.map((roundIndex) => {
           const matches = rounds.get(roundIndex)!;
           const label = ROUND_LABELS[matches[0].knockoutRound];
           return (
             <div
               key={roundIndex}
-              className="rounded-lg border border-slate-200 bg-white p-4"
+              className="flex min-h-72 flex-col rounded-lg border border-slate-200 bg-white p-5"
             >
               <h3 className="mb-3 text-sm font-semibold text-slate-900">
                 {label}
               </h3>
-              <ul className="space-y-2">
+              <ul className="flex flex-1 flex-col justify-evenly gap-4">
                 {matches.map((m) => (
                   <KnockoutMatchRow
                     key={m.id}
@@ -280,12 +280,12 @@ function KnockoutMatchRow({
     id ? participantById.get(id)?.name ?? "TBD" : isBye ? "Bye" : "TBD";
 
   return (
-    <li className="rounded-md border border-slate-100 bg-slate-50 px-3 py-2">
+    <li className="rounded-md border border-slate-100 bg-slate-50 px-4 py-3">
       <div className="flex items-center gap-2">
         <span className="min-w-[1.5rem] text-xs text-slate-400">
           {match.home.seed ?? ""}
         </span>
-        <span className="flex-1 truncate text-sm text-slate-700">
+        <span className="min-w-0 flex-1 break-words text-sm leading-5 text-slate-700">
           {sideLabel(match.home.participantId)}
         </span>
         {enterable ? (
@@ -306,7 +306,7 @@ function KnockoutMatchRow({
         <span className="min-w-[1.5rem] text-xs text-slate-400">
           {match.away.seed ?? ""}
         </span>
-        <span className="flex-1 truncate text-sm text-slate-700">
+        <span className="min-w-0 flex-1 break-words text-sm leading-5 text-slate-700">
           {sideLabel(match.away.participantId)}
         </span>
         {enterable ? (

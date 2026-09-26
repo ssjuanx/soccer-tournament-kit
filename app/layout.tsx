@@ -30,7 +30,7 @@ export default function RootLayout({
     <html lang="en">
       <body className="flex min-h-screen flex-col bg-slate-50 text-slate-900">
         <header className="border-b border-slate-200 bg-white">
-          <div className="mx-auto flex w-full max-w-5xl flex-wrap items-center justify-between gap-4 px-4 py-4">
+          <div className="mx-auto flex w-full max-w-7xl flex-wrap items-center justify-between gap-4 px-4 py-4">
             <Link href="/" className="text-lg font-bold tracking-tight">
               FC Tournament
             </Link>
@@ -51,11 +51,11 @@ export default function RootLayout({
             </nav>
           </div>
         </header>
-        <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-8">
+        <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-8">
           {children}
         </main>
         <footer className="border-t border-slate-200 bg-white">
-          <div className="mx-auto w-full max-w-5xl px-4 py-6 text-sm text-slate-500">
+          <div className="mx-auto w-full max-w-7xl px-4 py-6 text-sm text-slate-500">
             <p>FC Tournament &mdash; an open-source soccer tournament manager.</p>
           </div>
         </footer>

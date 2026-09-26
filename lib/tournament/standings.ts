@@ -120,8 +120,92 @@ interface Accumulator {
   goalsAgainst: number;
 }
 
+/** One participant's totals across every played tournament match. */
+export interface TournamentTotalsRow {
+  participantId: ParticipantId;
+  played: number;
+  wins: number;
+  draws: number;
+  losses: number;
+  goalsFor: number;
+  goalsAgainst: number;
+  goalDifference: number;
+}
+
 function createAccumulator(): Accumulator {
   return { played: 0, wins: 0, draws: 0, losses: 0, goalsFor: 0, goalsAgainst: 0 };
+}
+
+/**
+ * Calculates all-player totals across group, Championship, and Consolation
+ * matches. Unplayed matches, byes, TBD slots, and unknown participants do not
+ * count. The result is ordered by wins, goal difference, goals scored, then
+ * original draw order; it is a statistics view, not a qualification table.
+ */
+export function calculateTournamentTotals(
+  matches: Match[],
+  participants: Participant[],
+): TournamentTotalsRow[] {
+  const stats = new Map<ParticipantId, Accumulator>();
+  const drawOrderByParticipant = new Map<ParticipantId, number>();
+
+  for (const participant of participants) {
+    if (stats.has(participant.id)) {
+      throw new Error(`Duplicate participant id in totals input: ${participant.id}.`);
+    }
+    stats.set(participant.id, createAccumulator());
+    drawOrderByParticipant.set(participant.id, participant.drawOrder);
+  }
+
+  for (const match of matches) {
+    if (match.score == null) continue;
+    validateScore(match.score);
+    if (match.homeParticipantId == null || match.awayParticipantId == null) continue;
+    const home = stats.get(match.homeParticipantId);
+    const away = stats.get(match.awayParticipantId);
+    if (!home || !away) continue;
+
+    home.played++;
+    away.played++;
+    home.goalsFor += match.score.home;
+    home.goalsAgainst += match.score.away;
+    away.goalsFor += match.score.away;
+    away.goalsAgainst += match.score.home;
+
+    if (match.score.home > match.score.away) {
+      home.wins++;
+      away.losses++;
+    } else if (match.score.away > match.score.home) {
+      away.wins++;
+      home.losses++;
+    } else {
+      home.draws++;
+      away.draws++;
+    }
+  }
+
+  return participants
+    .map((participant) => {
+      const row = stats.get(participant.id)!;
+      return {
+        participantId: participant.id,
+        played: row.played,
+        wins: row.wins,
+        draws: row.draws,
+        losses: row.losses,
+        goalsFor: row.goalsFor,
+        goalsAgainst: row.goalsAgainst,
+        goalDifference: row.goalsFor - row.goalsAgainst,
+      };
+    })
+    .sort(
+      (a, b) =>
+        b.wins - a.wins ||
+        b.goalDifference - a.goalDifference ||
+        b.goalsFor - a.goalsFor ||
+        (drawOrderByParticipant.get(a.participantId) ?? 0) -
+          (drawOrderByParticipant.get(b.participantId) ?? 0),
+    );
 }
 
 /**
