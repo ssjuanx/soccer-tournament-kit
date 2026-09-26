@@ -70,7 +70,8 @@ export const tournaments = pgTable("tournaments", {
   drawPoints: integer("draw_points").notNull().default(1),
   lossPoints: integer("loss_points").notNull().default(0),
   // JSON-encoded tiebreaker order (a subset of TiebreakerKey[], e.g.
-  // `["goal_difference","goals_for"]`). Stored as plain `text` (not `jsonb`)
+  // `["goal_difference","goals_for","manual"]`). Stored as plain `text`
+  // (not `jsonb`)
   // to stay consistent with the text-based-enum pattern and avoid Neon HTTP
   // driver friction. Null means "use the default order".
   tiebreakerOrder: text("tiebreaker_order"),

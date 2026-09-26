@@ -50,11 +50,15 @@ export const DEFAULT_SCORING_CONFIG: ScoringConfig = {
  * The default tiebreaker order applied after points:
  *   1. Goal difference (descending)
  *   2. Goals for (descending)
- * (Original draw order is always the final fallback and is not listed here.)
+ *   3. Manual decision by the administrator
+ *
+ * Manual is terminal: an exact tie remains pending until the administrator
+ * records the result of the event's off-app decider.
  */
 export const DEFAULT_TIEBREAKER_ORDER: TiebreakerOrder = [
   "goal_difference",
   "goals_for",
+  "manual",
 ];
 
 /** All configurable tiebreaker keys (used for validation/normalization). */
@@ -133,9 +137,9 @@ function createAccumulator(): Accumulator {
  *
  * `options.scoring` overrides the points awarded per result (defaults to
  * standard soccer 3/1/0). `options.tiebreakerOrder` overrides the order of
- * tiebreakers applied after points (defaults to goal difference, then goals
- * for). Points are always the primary sort; draw order is always the final
- * fallback unless the `manual` tiebreaker is reached without a resolution.
+ * tiebreakers applied after points (defaults to goal difference, goals for,
+ * then manual). Points are always the primary sort; draw order is the final
+ * fallback only when the configured order does not reach unresolved manual.
  *
  * `options.manualResolutions` supplies the administrator's manual orderings
  * (one per group) used by the `manual` tiebreaker. `options.groupId` overrides

@@ -163,7 +163,7 @@ test("calculateStandings: tiebreaker is points > goal difference > goals for", (
   assert.equal(standings[2].participantId, "c");
 });
 
-test("calculateStandings: exact tie uses original draw order as fallback", () => {
+test("calculateStandings: exact tie uses draw order when manual is disabled", () => {
   const participants = [
     participant("a", 3),
     participant("b", 1),
@@ -176,11 +176,24 @@ test("calculateStandings: exact tie uses original draw order as fallback", () =>
     groupMatch("A", "b", "c", 1, 1),
     groupMatch("A", "a", "c", 1, 1),
   ];
-  const standings = calculateStandings(matches, participants);
+  const standings = calculateStandings(matches, participants, {
+    tiebreakerOrder: ["goal_difference", "goals_for"],
+  });
   assert.deepEqual(
     standings.map((r) => r.participantId),
     ["b", "c", "a"],
   );
+});
+
+test("calculateStandings: default exact tie waits for a manual decision", () => {
+  const participants = [participant("a", 1), participant("b", 2)];
+  const standings = calculateStandings(
+    [groupMatch("A", "a", "b", 1, 1)],
+    participants,
+  );
+
+  assert.deepEqual(standings.map((row) => row.position), [1, 1]);
+  assert.ok(standings.every((row) => row.unresolved));
 });
 
 test("calculateStandings: is sorted by position ascending", () => {
@@ -196,7 +209,7 @@ test("calculateStandings: is sorted by position ascending", () => {
   ];
   const standings: Standing = calculateStandings(matches, participants);
   for (let i = 1; i < standings.length; i++) {
-    assert.ok(standings[i - 1].position < standings[i].position);
+    assert.ok(standings[i - 1].position <= standings[i].position);
   }
 });
 // ---------------------------------------------------------------------------

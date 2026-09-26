@@ -232,7 +232,7 @@ test("uniqueTeamNames: empty when no teams assigned", () => {
 
 test("serializeTiebreakerOrder: default order -> null (canonical)", () => {
   assert.equal(
-    serializeTiebreakerOrder(["goal_difference", "goals_for"]),
+    serializeTiebreakerOrder(["goal_difference", "goals_for", "manual"]),
     null,
   );
 });
@@ -256,14 +256,17 @@ test("parseTiebreakerOrder: null/empty -> default order", () => {
   assert.deepEqual(parseTiebreakerOrder(null), [
     "goal_difference",
     "goals_for",
+    "manual",
   ]);
   assert.deepEqual(parseTiebreakerOrder(""), [
     "goal_difference",
     "goals_for",
+    "manual",
   ]);
   assert.deepEqual(parseTiebreakerOrder(undefined), [
     "goal_difference",
     "goals_for",
+    "manual",
   ]);
 });
 
@@ -282,10 +285,12 @@ test("parseTiebreakerOrder: malformed JSON -> default", () => {
   assert.deepEqual(parseTiebreakerOrder("not json"), [
     "goal_difference",
     "goals_for",
+    "manual",
   ]);
   assert.deepEqual(parseTiebreakerOrder("{"), [
     "goal_difference",
     "goals_for",
+    "manual",
   ]);
 });
 
@@ -293,10 +298,12 @@ test("parseTiebreakerOrder: non-array -> default", () => {
   assert.deepEqual(parseTiebreakerOrder('"goal_difference"'), [
     "goal_difference",
     "goals_for",
+    "manual",
   ]);
   assert.deepEqual(parseTiebreakerOrder("42"), [
     "goal_difference",
     "goals_for",
+    "manual",
   ]);
 });
 
@@ -319,7 +326,7 @@ test("parseTiebreakerOrder: head_to_head and manual are valid keys", () => {
 test("parseTiebreakerOrder: all-unknown -> default", () => {
   assert.deepEqual(
     parseTiebreakerOrder('["fair_play","coin_toss"]'),
-    ["goal_difference", "goals_for"],
+    ["goal_difference", "goals_for", "manual"],
   );
 });
 
@@ -360,6 +367,7 @@ test("normalizeTiebreakerOrder: empty/all-unknown -> default", () => {
   assert.deepEqual(normalizeTiebreakerOrder([]), [
     "goal_difference",
     "goals_for",
+    "manual",
   ]);
 });
 

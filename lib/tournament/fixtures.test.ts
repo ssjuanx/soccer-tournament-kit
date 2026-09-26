@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { generateGroupFixtures } from "./fixtures.ts";
+import { generateGroupFixtures, orderGroupMatchesForPlay } from "./fixtures.ts";
 import type { Match } from "./types.ts";
 
 function matchIds(matches: Match[]): string[] {
@@ -80,6 +80,18 @@ test("generateGroupFixtures: rejects duplicates and empty ids", () => {
   assert.throws(() => generateGroupFixtures(["a", "a"], "A"), /Duplicate/);
   assert.throws(() => generateGroupFixtures(["a", ""], "A"), /non-empty/);
   assert.throws(() => generateGroupFixtures(["a", "b"], ""), /groupId/);
+});
+
+test("orderGroupMatchesForPlay: alternates groups into one numbered sequence", () => {
+  const groupA = generateGroupFixtures(["a1", "a2", "a3"], "A");
+  const groupB = generateGroupFixtures(["b1", "b2", "b3", "b4"], "B");
+  const ordered = orderGroupMatchesForPlay([...groupA, ...groupB], ["A", "B"]);
+
+  assert.deepEqual(
+    ordered.map((match) => match.groupId),
+    ["A", "B", "A", "B", "A", "B", "B", "B", "B"],
+  );
+  assert.equal(new Set(ordered.map((match) => match.id)).size, 9);
 });
 // ---------------------------------------------------------------------------
 // Additional edge cases (Step 3)

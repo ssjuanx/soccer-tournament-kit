@@ -62,3 +62,43 @@ export function generateGroupFixtures(
   }
   return matches;
 }
+
+/**
+ * Produces one simple event-wide play order by taking the next match from each
+ * group in turn. No times or courts are assigned: this is only the sequence in
+ * which matches should be called. Matches whose group is not in
+ * `orderedGroupIds` are appended so malformed/legacy data is never hidden.
+ */
+export function orderGroupMatchesForPlay(
+  matches: Match[],
+  orderedGroupIds: GroupId[],
+): Match[] {
+  const byGroup = new Map<GroupId, Match[]>();
+  const knownGroupIds = new Set(orderedGroupIds);
+  const remaining: Match[] = [];
+
+  for (const match of matches) {
+    if (match.groupId == null || !knownGroupIds.has(match.groupId)) {
+      remaining.push(match);
+      continue;
+    }
+    const groupMatches = byGroup.get(match.groupId) ?? [];
+    groupMatches.push(match);
+    byGroup.set(match.groupId, groupMatches);
+  }
+
+  const ordered: Match[] = [];
+  const longestGroup = Math.max(
+    0,
+    ...orderedGroupIds.map((groupId) => byGroup.get(groupId)?.length ?? 0),
+  );
+
+  for (let matchIndex = 0; matchIndex < longestGroup; matchIndex++) {
+    for (const groupId of orderedGroupIds) {
+      const match = byGroup.get(groupId)?.[matchIndex];
+      if (match) ordered.push(match);
+    }
+  }
+
+  return [...ordered, ...remaining];
+}

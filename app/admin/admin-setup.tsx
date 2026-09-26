@@ -10,6 +10,7 @@ import {
 } from "@/lib/tournament/draw";
 import { calculateStandings } from "@/lib/tournament/standings";
 import { cohortKeyOf } from "@/lib/tournament/tiebreakers";
+import { orderGroupMatchesForPlay } from "@/lib/tournament/fixtures";
 import type {
   ManualTiebreakResolution,
   Match,
@@ -1175,9 +1176,8 @@ interface RulesSectionProps {
 /**
  * Edits the tournament-owned scoring rules and tiebreaker order. These are
  * editable even after fixtures are locked (changing rules never invalidates the
- * fixture pairings). Points are always the primary sort and draw order is
- * always the final fallback, so only the relative order of the listed
- * tiebreakers is configurable.
+ * fixture pairings). Points are always the primary sort. If `manual` is not
+ * configured, draw order remains the deterministic fallback.
  */
 function RulesSection({
   winPointsRaw,
@@ -1200,9 +1200,8 @@ function RulesSection({
         Scoring &amp; tiebreakers
       </h2>
       <p className="text-sm text-slate-600">
-        Points are always the primary sort and original draw order is always the
-        final tiebreaker. Configure the points awarded per result and the order
-        of the tiebreakers applied in between.
+        Points are always the primary sort. Manual is the final decision for an
+        exact tie: settle it outside the app, then record who ranks first here.
       </p>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -1260,7 +1259,7 @@ function RulesSection({
 
       <div className="space-y-2">
         <span className="text-sm font-medium text-slate-700">
-          Tiebreaker order (after points, before draw order)
+          Tiebreaker order (after points)
         </span>
         <ul className="space-y-1">
           {tiebreakerOrder.map((key, index) => (
@@ -1402,8 +1401,9 @@ function ManualTiebreakSection({
       <p className="text-sm text-slate-600">
         The <em>manual</em> tiebreaker is enabled. Each card below is one tied
         cohort that reached the manual tiebreaker without a stored resolution.
-        Order that cohort&rsquo;s participants best-first and save; the ordering
-        resolves only that cohort. Until then, its members share a position as{" "}
+        Use your off-app decider (for Los pibes, rock-paper-scissors), order the
+        participants winner-first, and save. The ordering resolves only that
+        cohort. Until then, its members share a position as{" "}
         <span className="font-medium">tiebreak pending</span>.
       </p>
       {totalCohorts === 0 ? (
@@ -1566,22 +1566,12 @@ function FixturesSection({
   participantById,
   groupLabelById,
 }: FixturesSectionProps) {
-  // Group matches by their groupId, preserving group label order (A, B, ...).
-  const matchesByGroup = new Map<string, Match[]>();
-  for (const match of matches) {
-    if (!match.groupId) continue;
-    const list = matchesByGroup.get(match.groupId);
-    if (list) {
-      list.push(match);
-    } else {
-      matchesByGroup.set(match.groupId, [match]);
-    }
-  }
-  const groups = [...matchesByGroup.entries()].sort(([a], [b]) => {
+  const orderedGroupIds = [...groupLabelById.keys()].sort((a, b) => {
     const la = groupLabelById.get(a) ?? a;
     const lb = groupLabelById.get(b) ?? b;
     return compareGroupLabels(la, lb);
   });
+  const playOrder = orderGroupMatchesForPlay(matches, orderedGroupIds);
 
   return (
     <section aria-labelledby="fixtures-heading" className="space-y-4">
@@ -1592,23 +1582,17 @@ function FixturesSection({
         Fixtures &amp; scores
       </h2>
       <p className="text-sm text-slate-600">
-        Enter the final score for each match. Leave both blank to mark a match
-        as unplayed.
+        Play from top to bottom; no times are assigned. Enter the final score
+        for each match, or leave both blank to mark it as unplayed.
       </p>
-      <div className="space-y-4">
-        {groups.map(([groupId, groupMatches]) => (
-          <div
-            key={groupId}
-            className="rounded-lg border border-slate-200 bg-white p-4"
-          >
-            <h3 className="text-sm font-semibold text-slate-900">
-              Group {groupLabelById.get(groupId) ?? "?"}
-            </h3>
-            <ul className="mt-2 divide-y divide-slate-100">
-              {groupMatches.map((match) => (
+      <div className="rounded-lg border border-slate-200 bg-white p-4">
+        <ol className="divide-y divide-slate-100">
+              {playOrder.map((match, index) => (
                 <MatchRow
                   key={match.id}
                   match={match}
+                  matchNumber={index + 1}
+                  groupLabel={groupLabelById.get(match.groupId ?? "") ?? "?"}
                   input={scoreInputs[match.id] ?? { home: "", away: "" }}
                   saving={scoreSaving[match.id] === true}
                   onScoreChange={onScoreChange}
@@ -1616,9 +1600,7 @@ function FixturesSection({
                   participantById={participantById}
                 />
               ))}
-            </ul>
-          </div>
-        ))}
+        </ol>
       </div>
     </section>
   );
@@ -1626,6 +1608,8 @@ function FixturesSection({
 
 interface MatchRowProps {
   match: Match;
+  matchNumber: number;
+  groupLabel: string;
   input: ScoreInput;
   saving: boolean;
   onScoreChange: (matchId: string, side: "home" | "away", value: string) => void;
@@ -1635,6 +1619,8 @@ interface MatchRowProps {
 
 function MatchRow({
   match,
+  matchNumber,
+  groupLabel,
   input,
   saving,
   onScoreChange,
@@ -1650,6 +1636,9 @@ function MatchRow({
 
   return (
     <li className="flex flex-wrap items-center gap-2 py-2">
+      <span className="w-20 shrink-0 text-xs font-semibold text-slate-500">
+        #{matchNumber} · Group {groupLabel}
+      </span>
       <span className="flex-1 text-right text-sm text-slate-900">
         {home ? home.name : "TBD"}
         {home?.teamName ? (

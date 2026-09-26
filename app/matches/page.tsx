@@ -2,6 +2,7 @@ import { compareGroupLabels, type SavedParticipant } from "@/lib/db/setup";
 import { getTournamentSetup } from "@/lib/db/tournaments";
 import { getGroupMatches, getKnockoutMatches } from "@/lib/db/matches";
 import { computeKnockoutView } from "@/lib/db/fixtures";
+import { orderGroupMatchesForPlay } from "@/lib/tournament/fixtures";
 import type { Match } from "@/lib/tournament/types";
 import { BracketView } from "../bracket/bracket-view";
 
@@ -97,38 +98,21 @@ function MatchesList({ participants, groups, matches }: MatchesListProps) {
     labelByGroupId.set(group.id, group.label);
   }
 
-  // Group matches by their groupId, preserving group label order (A, B, …).
-  const matchesByGroup = new Map<string, Match[]>();
-  for (const match of matches) {
-    if (!match.groupId) continue;
-    const list = matchesByGroup.get(match.groupId);
-    if (list) {
-      list.push(match);
-    } else {
-      matchesByGroup.set(match.groupId, [match]);
-    }
-  }
-  // Order groups by their label (A, B, …), not by insertion order.
-  const visibleGroups = [...matchesByGroup.keys()].sort((a, b) => {
+  const orderedGroupIds = groups.map((group) => group.id).sort((a, b) => {
     const la = labelByGroupId.get(a) ?? a;
     const lb = labelByGroupId.get(b) ?? b;
     return compareGroupLabels(la, lb);
   });
+  const playOrder = orderGroupMatchesForPlay(matches, orderedGroupIds);
 
   return (
-    <div className="space-y-4">
-      {visibleGroups.map((groupId) => {
-        const groupMatches = matchesByGroup.get(groupId)!;
-        return (
-        <div
-          key={groupId}
-          className="rounded-lg border border-slate-200 bg-white p-4"
-        >
-          <h2 className="text-sm font-semibold text-slate-900">
-            Group {labelByGroupId.get(groupId) ?? "?"}
-          </h2>
-          <ul className="mt-2 divide-y divide-slate-100">
-            {groupMatches.map((match) => {
+    <section className="rounded-lg border border-slate-200 bg-white p-4">
+      <h2 className="text-sm font-semibold text-slate-900">Match order</h2>
+      <p className="mt-1 text-xs text-slate-500">
+        Play from top to bottom. No times are assigned.
+      </p>
+      <ol className="mt-2 divide-y divide-slate-100">
+        {playOrder.map((match, index) => {
               const home = match.homeParticipantId
                 ? participantById.get(match.homeParticipantId)
                 : undefined;
@@ -141,6 +125,9 @@ function MatchesList({ participants, groups, matches }: MatchesListProps) {
                   key={match.id}
                   className="flex flex-wrap items-center gap-2 py-2"
                 >
+                  <span className="w-20 shrink-0 text-xs font-semibold text-slate-500">
+                    #{index + 1} · Group {labelByGroupId.get(match.groupId ?? "") ?? "?"}
+                  </span>
                   <span className="flex-1 text-right text-sm text-slate-900">
                     {home ? home.name : "TBD"}
                     {home?.teamName ? (
@@ -158,11 +145,8 @@ function MatchesList({ participants, groups, matches }: MatchesListProps) {
                   </span>
                 </li>
               );
-            })}
-          </ul>
-        </div>
-        );
-      })}
-    </div>
+        })}
+      </ol>
+    </section>
   );
 }
