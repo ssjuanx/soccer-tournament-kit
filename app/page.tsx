@@ -1,4 +1,7 @@
 import Link from "next/link";
+import { getTournamentSetup } from "@/lib/db/tournaments";
+
+export const dynamic = "force-dynamic";
 
 const features = [
   {
@@ -14,22 +17,32 @@ const features = [
   {
     href: "/bracket",
     title: "Bracket",
-    description: "The knockout bracket from the round of 16 to the final.",
+    description: "Championship and Consolation, from the first round to both finals.",
   },
 ];
 
-export default function HomePage() {
+export default async function HomePage() {
+  const setup = await getTournamentSetup();
+  const tournament = setup.tournament;
+  const heading = tournament?.name || "FC Tournament";
+  const details = [tournament?.edition, tournament?.date]
+    .filter(Boolean)
+    .join(" · ");
+
   return (
     <div className="space-y-10">
       <section className="space-y-4">
         <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
-          Welcome to FC Tournament
+          {tournament ? heading : "Welcome to FC Tournament"}
         </h1>
+        {details ? (
+          <p className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+            {details}
+          </p>
+        ) : null}
         <p className="max-w-2xl text-slate-600">
-          A simple, open-source manager for running a soccer tournament with a
-          group stage and a knockout bracket. One administrator enters the
-          participants, teams, and match scores. Everyone else follows along on
-          this public, read-only site.
+          {tournament?.description ||
+            "Four groups compete for two paths: the top two in each group advance to the Championship, while everyone else continues in Consolation."}
         </p>
         <div className="flex flex-wrap gap-3 pt-2">
           <Link
@@ -42,7 +55,7 @@ export default function HomePage() {
             href="/bracket"
             className="rounded-md border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-100"
           >
-            View bracket
+            View brackets
           </Link>
         </div>
       </section>

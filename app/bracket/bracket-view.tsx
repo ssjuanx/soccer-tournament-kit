@@ -29,7 +29,15 @@ export function BracketView({
 
   // Group matches by round index (already ordered round-then-match).
   const rounds = new Map<number, BracketMatch[]>();
+  const roundsWithByes = new Set<number>();
   for (const m of bracket) {
+    const isAutomaticBye =
+      m.roundIndex === 0 &&
+      (m.home.participantId == null) !== (m.away.participantId == null);
+    if (isAutomaticBye) {
+      roundsWithByes.add(m.roundIndex);
+      continue;
+    }
     const list = rounds.get(m.roundIndex);
     if (list) list.push(m);
     else rounds.set(m.roundIndex, [m]);
@@ -55,7 +63,9 @@ export function BracketView({
       <div className="grid gap-4 lg:grid-cols-3 xl:grid-cols-4">
         {roundIndices.map((roundIndex) => {
           const matches = rounds.get(roundIndex)!;
-          const label = ROUND_LABELS[matches[0].knockoutRound];
+          const label = roundsWithByes.has(roundIndex)
+            ? "Preliminary round"
+            : ROUND_LABELS[matches[0].knockoutRound];
           return (
             <section
               key={roundIndex}

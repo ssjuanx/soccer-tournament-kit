@@ -52,6 +52,7 @@ export default async function StandingsPage() {
           }}
           tiebreakerOrder={setup.tournament.tiebreakerOrder}
           manualResolutions={setup.manualResolutions}
+          qualifiersPerGroup={setup.tournament.qualifiersPerGroup}
         />
       )}
     </div>
@@ -65,6 +66,7 @@ interface StandingsTablesProps {
   scoring: ScoringConfig;
   tiebreakerOrder: TiebreakerOrder;
   manualResolutions: ManualTiebreakResolution[];
+  qualifiersPerGroup: number;
 }
 
 function StandingsTables({
@@ -74,6 +76,7 @@ function StandingsTables({
   scoring,
   tiebreakerOrder,
   manualResolutions,
+  qualifiersPerGroup,
 }: StandingsTablesProps) {
   // Group participants by their groupId, preserving the snapshot's draw order.
   const participantsByGroup = new Map<string, SavedParticipant[]>();
@@ -117,6 +120,9 @@ function StandingsTables({
           { scoring, tiebreakerOrder, manualResolutions },
         );
         const hasUnresolved = standings.some((r) => r.unresolved);
+        const groupComplete =
+          groupMatches.length > 0 &&
+          groupMatches.every((match) => match.score != null);
         return (
           <section
             key={group.id}
@@ -159,10 +165,13 @@ function StandingsTables({
                     const participant = groupParticipants.find(
                       (p) => p.id === row.participantId,
                     );
+                    const championship = row.position <= qualifiersPerGroup;
                     return (
                       <tr
                         key={row.participantId}
-                        className="border-b border-slate-100 last:border-0"
+                        className={`border-b border-slate-100 last:border-0 ${
+                          championship ? "bg-emerald-50/60" : ""
+                        }`}
                       >
                         <td className="py-2 pr-3 font-medium text-slate-900">
                           {row.position}
@@ -181,6 +190,21 @@ function StandingsTables({
                               ({participant.teamName})
                             </span>
                           ) : null}
+                          <span
+                            className={`ml-2 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+                              championship
+                                ? "bg-emerald-100 text-emerald-700"
+                                : "bg-slate-100 text-slate-500"
+                            }`}
+                          >
+                            {championship
+                              ? groupComplete
+                                ? "Championship"
+                                : "Champ. zone"
+                              : groupComplete
+                                ? "Consolation"
+                                : "Cons. zone"}
+                          </span>
                         </td>
                         <td className="px-3 py-2 text-center text-slate-700">{row.played}</td>
                         <td className="px-3 py-2 text-center text-slate-700">{row.wins}</td>

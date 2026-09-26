@@ -37,8 +37,8 @@ export default async function MatchesPage() {
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Matches</h1>
         <p className="mt-1 text-slate-600">
-          Every scheduled group-stage match, its final score, and the knockout
-          bracket.
+          Every scheduled group-stage match, its final score, and both knockout
+          brackets.
         </p>
       </div>
 
