@@ -2,14 +2,9 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 
-An open-source soccer tournament manager. One administrator enters
-participants, teams, and match scores manually. Everyone else visits a public,
-read-only website to follow the group stage and knockout bracket.
+An open-source soccer tournament manager. One administrator enters participants, teams, and match scores manually. Everyone else visits a public, read-only website to follow the group stage and knockout bracket.
 
-Designed for friendly, in-person tournaments (amateur leagues, office cups,
-weekend pichadas) where a single person is in charge of keeping scores and the
-rest of the participants just want to check tables, fixtures, and brackets from
-their phones.
+Designed for friendly, in-person tournaments where a single person is in charge of keeping scores and therest of the participants just want to check tables, fixtures, and brackets from their phones.
 
 ## Features
 
