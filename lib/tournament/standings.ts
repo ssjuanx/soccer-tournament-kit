@@ -1,0 +1,325 @@
+/**
+ * Soccer group-stage standings calculation.
+ *
+ * Standings are derived from completed group-stage matches. Nothing here is
+ * persisted; these values are recomputed from the stored match scores.
+ */
+
+import type {
+  GroupId,
+  ManualTiebreakResolution,
+  Match,
+  MatchScore,
+  Participant,
+  ParticipantId,
+  ScoringConfig,
+  Standing,
+  StandingRow,
+  TiebreakerKey,
+  TiebreakerOrder,
+} from "./types";
+import { rankRows } from "./tiebreakers.ts";
+
+// ---------------------------------------------------------------------------
+// Soccer scoring
+// ---------------------------------------------------------------------------
+
+/**
+ * Default soccer group-stage points: Win = 3, Draw = 1, Loss = 0.
+ *
+ * This is the single source of truth for the default scoring and the only
+ * runtime constant in the tournament domain. It lives here because standings
+ * are the only place these rules are applied. The actual values are now
+ * tournament-owned configuration (see `ScoringConfig`); `calculateStandings`
+ * accepts an override and falls back to these defaults.
+ */
+export const POINTS = {
+  win: 3,
+  draw: 1,
+  loss: 0,
+} as const;
+
+/** The default scoring config, derived from `POINTS`. */
+export const DEFAULT_SCORING_CONFIG: ScoringConfig = {
+  winPoints: POINTS.win,
+  drawPoints: POINTS.draw,
+  lossPoints: POINTS.loss,
+};
+
+/**
+ * The default tiebreaker order applied after points:
+ *   1. Goal difference (descending)
+ *   2. Goals for (descending)
+ *   3. Manual decision by the administrator
+ *
+ * Manual is terminal: an exact tie remains pending until the administrator
+ * records the result of the event's off-app decider.
+ */
+export const DEFAULT_TIEBREAKER_ORDER: TiebreakerOrder = [
+  "goal_difference",
+  "goals_for",
+  "manual",
+];
+
+/** All configurable tiebreaker keys (used for validation/normalization). */
+export const ALL_TIEBREAKER_KEYS: readonly TiebreakerKey[] = [
+  "goal_difference",
+  "goals_for",
+  "head_to_head",
+  "manual",
+];
+
+// ---------------------------------------------------------------------------
+// Score validation
+// ---------------------------------------------------------------------------
+
+/**
+ * Validates a completed match score.
+ *
+ * A completed soccer score must have non-negative integer goals for both
+ * sides. Malformed scores (negative or fractional goals) are rejected rather
+ * than silently accepted, which would otherwise corrupt the derived standings.
+ */
+export function validateScore(score: MatchScore): void {
+  if (!Number.isInteger(score.home) || !Number.isInteger(score.away)) {
+    throw new Error(
+      `Score goals must be integers (got ${score.home}-${score.away}).`,
+    );
+  }
+  if (score.home < 0 || score.away < 0) {
+    throw new Error(
+      `Score goals must be non-negative (got ${score.home}-${score.away}).`,
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Tiebreaker order (configurable via `TiebreakerOrder`)
+// ---------------------------------------------------------------------------
+
+/**
+ * Group-stage ranking order:
+ *
+ *   1. Points (descending) — always primary, never configurable.
+ *   2. The configured `TiebreakerOrder`, applied recursively to each tied
+ *      cohort. Defaults to goal difference, then goals for. `head_to_head`
+ *      re-ranks a cohort on a mini-table of matches between its members;
+ *      `manual` applies the administrator's stored ordering (terminal — either
+ *      it resolves the cohort or leaves it unresolved).
+ *   3. Original draw order (ascending) — always the final deterministic
+ *      fallback (lower drawOrder = drawn earlier = higher rank), used when no
+ *      configured tiebreaker (including `manual`) resolves a tie.
+ */
+
+interface Accumulator {
+  played: number;
+  wins: number;
+  draws: number;
+  losses: number;
+  goalsFor: number;
+  goalsAgainst: number;
+}
+
+/** One participant's totals across every played tournament match. */
+export interface TournamentTotalsRow {
+  participantId: ParticipantId;
+  played: number;
+  wins: number;
+  draws: number;
+  losses: number;
+  goalsFor: number;
+  goalsAgainst: number;
+  goalDifference: number;
+}
+
+function createAccumulator(): Accumulator {
+  return { played: 0, wins: 0, draws: 0, losses: 0, goalsFor: 0, goalsAgainst: 0 };
+}
+
+/**
+ * Calculates all-player totals across group, Championship, and Consolation
+ * matches. Unplayed matches, byes, TBD slots, and unknown participants do not
+ * count. The result is ordered by wins, goal difference, goals scored, then
+ * original draw order; it is a statistics view, not a qualification table.
+ */
+export function calculateTournamentTotals(
+  matches: Match[],
+  participants: Participant[],
+): TournamentTotalsRow[] {
+  const stats = new Map<ParticipantId, Accumulator>();
+  const drawOrderByParticipant = new Map<ParticipantId, number>();
+
+  for (const participant of participants) {
+    if (stats.has(participant.id)) {
+      throw new Error(`Duplicate participant id in totals input: ${participant.id}.`);
+    }
+    stats.set(participant.id, createAccumulator());
+    drawOrderByParticipant.set(participant.id, participant.drawOrder);
+  }
+
+  for (const match of matches) {
+    if (match.score == null) continue;
+    validateScore(match.score);
+    if (match.homeParticipantId == null || match.awayParticipantId == null) continue;
+    const home = stats.get(match.homeParticipantId);
+    const away = stats.get(match.awayParticipantId);
+    if (!home || !away) continue;
+
+    home.played++;
+    away.played++;
+    home.goalsFor += match.score.home;
+    home.goalsAgainst += match.score.away;
+    away.goalsFor += match.score.away;
+    away.goalsAgainst += match.score.home;
+
+    if (match.score.home > match.score.away) {
+      home.wins++;
+      away.losses++;
+    } else if (match.score.away > match.score.home) {
+      away.wins++;
+      home.losses++;
+    } else {
+      home.draws++;
+      away.draws++;
+    }
+  }
+
+  return participants
+    .map((participant) => {
+      const row = stats.get(participant.id)!;
+      return {
+        participantId: participant.id,
+        played: row.played,
+        wins: row.wins,
+        draws: row.draws,
+        losses: row.losses,
+        goalsFor: row.goalsFor,
+        goalsAgainst: row.goalsAgainst,
+        goalDifference: row.goalsFor - row.goalsAgainst,
+      };
+    })
+    .sort(
+      (a, b) =>
+        b.wins - a.wins ||
+        b.goalDifference - a.goalDifference ||
+        b.goalsFor - a.goalsFor ||
+        (drawOrderByParticipant.get(a.participantId) ?? 0) -
+          (drawOrderByParticipant.get(b.participantId) ?? 0),
+    );
+}
+
+/**
+ * Calculates standings for a single group from its group-stage matches.
+ *
+ * `participants` must be the group's participants; their `drawOrder` is used as
+ * the deterministic final tiebreaker (lower drawOrder = drawn earlier = higher
+ * rank) and also determines which participants appear in the table, so a
+ * participant with no completed matches still shows up with zeros.
+ *
+ * Incomplete matches (no score) and non-group matches are ignored. Only
+ * completed group-stage matches involving two known participants count.
+ *
+ * `options.scoring` overrides the points awarded per result (defaults to
+ * standard soccer 3/1/0). `options.tiebreakerOrder` overrides the order of
+ * tiebreakers applied after points (defaults to goal difference, goals for,
+ * then manual). Points are always the primary sort; draw order is the final
+ * fallback only when the configured order does not reach unresolved manual.
+ *
+ * `options.manualResolutions` supplies the administrator's manual orderings
+ * (one per group) used by the `manual` tiebreaker. `options.groupId` overrides
+ * which group's resolution is consulted (it otherwise defaults to the first
+ * participant's `groupId`). Both options default so existing call sites and
+ * tests remain backward-compatible.
+ */
+export function calculateStandings(
+  matches: Match[],
+  participants: Participant[],
+  options?: {
+    scoring?: ScoringConfig;
+    tiebreakerOrder?: TiebreakerOrder;
+    manualResolutions?: ManualTiebreakResolution[];
+    groupId?: GroupId | null;
+  },
+): Standing {
+  const scoring = options?.scoring ?? DEFAULT_SCORING_CONFIG;
+  const tiebreakerOrder =
+    options?.tiebreakerOrder ?? DEFAULT_TIEBREAKER_ORDER;
+
+  const stats = new Map<ParticipantId, Accumulator>();
+  const drawOrderByParticipant = new Map<ParticipantId, number>();
+
+  for (const participant of participants) {
+    if (stats.has(participant.id)) {
+      throw new Error(`Duplicate participant id in standings input: ${participant.id}.`);
+    }
+    stats.set(participant.id, createAccumulator());
+    drawOrderByParticipant.set(participant.id, participant.drawOrder);
+  }
+
+  for (const match of matches) {
+    if (match.stage !== "group") continue;
+    if (match.score == null) continue;
+    validateScore(match.score);
+    const homeId = match.homeParticipantId;
+    const awayId = match.awayParticipantId;
+    if (homeId == null || awayId == null) continue;
+
+    const home = stats.get(homeId);
+    const away = stats.get(awayId);
+    // Only count matches between known participants of this group.
+    if (home == null || away == null) continue;
+
+    const { home: homeGoals, away: awayGoals } = match.score;
+    home.played++;
+    away.played++;
+    home.goalsFor += homeGoals;
+    home.goalsAgainst += awayGoals;
+    away.goalsFor += awayGoals;
+    away.goalsAgainst += homeGoals;
+
+    if (homeGoals > awayGoals) {
+      home.wins++;
+      away.losses++;
+    } else if (homeGoals < awayGoals) {
+      away.wins++;
+      home.losses++;
+    } else {
+      home.draws++;
+      away.draws++;
+    }
+  }
+
+  const rows: StandingRow[] = participants.map((participant) => {
+    const acc = stats.get(participant.id)!;
+    return {
+      participantId: participant.id,
+      position: 0,
+      played: acc.played,
+      wins: acc.wins,
+      draws: acc.draws,
+      losses: acc.losses,
+      goalsFor: acc.goalsFor,
+      goalsAgainst: acc.goalsAgainst,
+      goalDifference: acc.goalsFor - acc.goalsAgainst,
+      points:
+        acc.wins * scoring.winPoints +
+        acc.draws * scoring.drawPoints +
+        acc.losses * scoring.lossPoints,
+      unresolved: false,
+    };
+  });
+
+  // Cohort-based ranking (Phase 2). The resolver assigns positions and the
+  // unresolved flag in place and returns the rows in ranked order.
+  const groupId =
+    options?.groupId ?? participants.find((p) => p.groupId != null)?.groupId ?? null;
+
+  return rankRows(rows, {
+    drawOrderById: drawOrderByParticipant,
+    matches,
+    scoring,
+    tiebreakerOrder,
+    manualResolutions: options?.manualResolutions,
+    groupId,
+  });
+}
