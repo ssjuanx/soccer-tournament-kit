@@ -1,11 +1,11 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import AdminSetup, { type AdminTab } from "./admin-setup";
 import AdminRules from "./admin-rules";
-import { createTournamentAction } from "@/lib/db/actions";
+import { createTournamentAction, deleteTournamentAction } from "@/lib/db/actions";
 import { Tabs, type TabItem } from "@/components/tabs";
 import type { Match } from "@/lib/tournament/types";
 import type { TournamentRule } from "@/lib/db/rules";
@@ -95,8 +95,101 @@ export default function AdminPanel({
           onDirtyChange={handleRulesDirty}
         />
       </div>
+
+      <DangerZone />
     </div>
   );
+type DeleteStatus = "idle" | "armed" | "deleting" | "error";
+
+/**
+ * Destructive-action zone shown at the bottom of the admin panel. "Delete
+ * tournament" wipes the active tournament and all of its data (groups, teams,
+ * participants, matches, manual tiebreak resolutions) via
+ * `deleteTournamentAction`. The global rule cards are preserved.
+ *
+ * The button uses a two-step confirm to prevent accidental wipes: the first
+ * click arms it (showing a "click again to confirm" prompt) and reverts after
+ * five seconds if not confirmed. After a successful delete the action
+ * revalidates `/` and `/admin`; `router.refresh()` re-runs the server
+ * component, which then renders the "Create tournament" form.
+ */
+function DangerZone() {
+  const router = useRouter();
+  const [status, setStatus] = useState<DeleteStatus>("idle");
+  const [error, setError] = useState<string | null>(null);
+  const armTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (armTimer.current) clearTimeout(armTimer.current);
+    };
+  }, []);
+
+  async function handleDelete() {
+    // First click arms the button; the second click within the window confirms.
+    if (status === "idle") {
+      setStatus("armed");
+      setError(null);
+      armTimer.current = setTimeout(() => setStatus("idle"), 5000);
+      return;
+    }
+    if (status === "armed") {
+      if (armTimer.current) {
+        clearTimeout(armTimer.current);
+        armTimer.current = null;
+      }
+      setStatus("deleting");
+      setError(null);
+      const result = await deleteTournamentAction();
+      if (result.ok) {
+        router.refresh();
+        return;
+      }
+      setStatus("error");
+      setError(result.error);
+    }
+  }
+
+  const label =
+    status === "deleting"
+      ? "Deleting…"
+      : status === "armed"
+        ? "Click again to confirm"
+        : "Delete tournament";
+
+  return (
+    <section
+      aria-labelledby="danger-zone-heading"
+      className="rounded-lg border border-red-200 bg-red-50 p-5"
+    >
+      <h2
+        id="danger-zone-heading"
+        className="text-lg font-semibold text-red-900"
+      >
+        Danger zone
+      </h2>
+      <p className="mt-1 text-sm text-red-700">
+        Deletes the active tournament and all of its data — groups, teams,
+        participants, matches, and manual tiebreak resolutions. This cannot be
+        undone. The public rule cards are preserved.
+      </p>
+      <div className="mt-4 flex items-center gap-3">
+        <button
+          type="button"
+          onClick={handleDelete}
+          disabled={status === "deleting"}
+          className="rounded-md bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-red-500 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {label}
+        </button>
+        {status === "error" && error ? (
+          <span className="text-sm text-red-700">{error}</span>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
 type CreateStatus = "idle" | "creating" | "error";
 
 /**

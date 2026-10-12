@@ -40,6 +40,7 @@ import {
 } from "./matches.ts";
 import {
   createTournament,
+  deleteTournament,
   getTournamentSetup,
   saveManualTiebreakResolution,
   saveParticipants,
@@ -715,6 +716,34 @@ export async function createTournamentAction(
         error instanceof Error
           ? error.message
           : "Failed to create the tournament.",
+    };
+  }
+}
+
+/**
+ * Deletes the active tournament and, via the schema's cascade foreign keys,
+ * every record tied to it (groups, teams, participants, matches, manual
+ * tiebreak resolutions). The global `tournament_rules` cards are preserved.
+ * Revalidates the public site (`/`) and `/admin` so both re-read from a clean
+ * state: the admin panel falls back to the "Create tournament" form and the
+ * public pages show the empty state.
+ */
+export async function deleteTournamentAction(): Promise<ActionResult> {
+  if (!(await isAdminActionAuthorized())) {
+    return { ok: false, error: "Administrator authentication required." };
+  }
+  try {
+    await deleteTournament();
+    revalidatePath("/");
+    revalidatePath("/admin");
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : "Failed to delete the tournament.",
     };
   }
 }

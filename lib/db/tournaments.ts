@@ -376,6 +376,25 @@ export async function createTournament(input: {
 }
 
 /**
+ * Deletes the active tournament and, through the schema's `onDelete: cascade`
+ * foreign keys, every record that belongs to it: `groups`, `teams`,
+ * `participants`, `matches`, and `manual_tiebreak_resolutions`.
+ *
+ * `tournament_rules` is intentionally left untouched — those are global event
+ * cards (no FK to the tournament) that survive replacing or clearing the
+ * setup by design.
+ *
+ * The Neon HTTP driver does not support interactive transactions, but this is
+ * a single `DELETE` on the parent row: the cascading child deletes run inside
+ * that same statement on the Postgres side, so the wipe is atomic without
+ * needing a client-side transaction. Idempotent — a no-op if no active
+ * tournament exists.
+ */
+export async function deleteTournament(): Promise<void> {
+  await db.delete(tournaments).where(eq(tournaments.id, ACTIVE_TOURNAMENT_ID));
+}
+
+/**
  * Persists the active tournament's identity metadata (name, edition, date,
  * description). Kept separate from `saveTournamentSetup` because metadata is
  * editable independently of the participant/group counts and is never locked
